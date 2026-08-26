@@ -1,0 +1,12 @@
+{"type":"queue-operation","op":"start"}
+{"type":"user","message":{"role":"user","content":"Fix the pagination bug in the search endpoint"}}
+{"type":"attachment","data":"blob"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"secret reasoning that must not leak"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Looking at the filter chain now."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/x"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"GIANT TOOL OUTPUT THAT MUST NOT APPEAR"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The bug is in Paginator line 42: the results list is empty."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Apply the fix and add a test"}]}}
+not valid json — parser must tolerate this
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixed and tested; 3 tests pass."}]}}
+{"type":"user","message":{"role":"user","content":"ship it"}}
+{"type":"last-prompt","prompt":"ship it"}

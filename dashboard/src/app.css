@@ -1,0 +1,186 @@
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import 'tailwindcss';
+
+/* Console-telemetry tokens. Dark is home; light is the printout.
+   Theme resolution: data-theme attr (manual switch) wins; otherwise OS. */
+:root {
+  --bg: #101418;
+  --surface: #1a2028;
+  --raised: #222a35;
+  --line: #2a323d;
+  --ink: #d7dee8;
+  --muted: #8a96a5;
+  --accent: #ffb454;
+  --danger: #f87171;
+  /* column hues */
+  --stage-explore: #67e8f9;
+  --stage-shape: #a78bfa;
+  --stage-build: #fbbf24;
+  --stage-done: #4ade80;
+  /* per-stage hues (tile tint, strip, left edge) */
+  --st-explore: #67e8f9;
+  --st-plan: #a78bfa;
+  --st-development: #fbbf24;
+  --st-review: #f472b6;
+  --st-testing: #fb923c;
+  --st-deploy: #38bdf8;
+  --st-done: #4ade80;
+  /* how strongly a tile takes its stage hue */
+  --tile-mix: 9%;
+}
+
+/* Light palette, applied twice on purpose: once for OS preference when no
+   manual choice exists, once for the explicit switch. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f2f4f7;
+    --surface: #ffffff;
+    --raised: #eef1f5;
+    --line: #d7dde5;
+    --ink: #1b222b;
+    --muted: #5a6472;
+    --accent: #b45309;
+    --danger: #dc2626;
+    --stage-explore: #0e7490;
+    --stage-shape: #6d28d9;
+    --stage-build: #b45309;
+    --stage-done: #15803d;
+    --st-explore: #0e7490;
+    --st-plan: #6d28d9;
+    --st-development: #b45309;
+    --st-review: #be185d;
+    --st-testing: #c2410c;
+    --st-deploy: #0369a1;
+    --st-done: #15803d;
+    --tile-mix: 6%;
+  }
+}
+:root[data-theme='light'] {
+  --bg: #f2f4f7;
+  --surface: #ffffff;
+  --raised: #eef1f5;
+  --line: #d7dde5;
+  --ink: #1b222b;
+  --muted: #5a6472;
+  --accent: #b45309;
+  --danger: #dc2626;
+  --stage-explore: #0e7490;
+  --stage-shape: #6d28d9;
+  --stage-build: #b45309;
+  --stage-done: #15803d;
+  --st-explore: #0e7490;
+  --st-plan: #6d28d9;
+  --st-development: #b45309;
+  --st-review: #be185d;
+  --st-testing: #c2410c;
+  --st-deploy: #0369a1;
+  --st-done: #15803d;
+  --tile-mix: 6%;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-explore: var(--stage-explore);
+  --color-shape: var(--stage-shape);
+  --color-build: var(--stage-build);
+  --color-done: var(--stage-done);
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+html, body, #root {
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* Focus is a console cursor, not a browser default. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@keyframes mc-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.mc-transition-pulse {
+  animation: mc-blink 0.9s ease-in-out 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-transition-pulse { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}
+
+/* Instant themed tooltip (native title is too slow/small for glancing). */
+.mc-tip {
+  position: relative;
+}
+.mc-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease-in;
+  z-index: 30;
+}
+.mc-tip:hover::after,
+.mc-tip:focus-visible::after {
+  opacity: 1;
+}
+
+/* Rendered brief markdown. */
+.brief-md h1, .brief-md h2, .brief-md h3 {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 1.1rem 0 0.35rem;
+}
+.brief-md p, .brief-md li { font-size: 1.15rem; line-height: 1.5; margin: 0.25rem 0; }
+.brief-md ul { padding-left: 1.1rem; list-style: '· '; }
+.brief-md code { font-family: var(--font-mono); font-size: 1rem; background: var(--raised); padding: 0 0.25em; border-radius: 3px; }
+.brief-md a { color: var(--accent); text-decoration: underline; }
+/* Inside a field panel the label is already above, so the first line sits flush. */
+.brief-md > :first-child { margin-top: 0; }
+.brief-md > :last-child { margin-bottom: 0; }
+
+/* Inline markdown living in a list row or a label/value row, where marked has
+   no block wrapper to style. */
+.brief-row a, dd a { color: var(--accent); text-decoration: underline; }
+.brief-row code, dd code {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  background: var(--raised);
+  padding: 0 0.25em;
+  border-radius: 3px;
+}

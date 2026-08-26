@@ -1,0 +1,26 @@
+#!/bin/sh
+# Control the mission-control launchd agent.
+LABEL="com.claude-mission-control.agent"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+DATA="${MC_DATA_DIR:-$HOME/claude-tasks}"
+
+case "${1:-}" in
+  start)
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl kickstart -k "gui/$(id -u)/$LABEL"
+    ;;
+  stop)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    ;;
+  status)
+    launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -E 'state|pid' | head -3
+    curl -s --max-time 2 "http://127.0.0.1:${MC_PORT:-47613}/api/state" >/dev/null 2>&1 \
+      && echo "api: UP" || echo "api: DOWN"
+    ;;
+  logs)
+    tail -n "${2:-50}" "$DATA/.index/server.log" "$DATA/.index/server.err.log"
+    ;;
+  *)
+    echo "usage: cmcctl start|stop|status|logs [n]" >&2
+    exit 2
+    ;;
+esac
