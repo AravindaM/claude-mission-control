@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasSection, sectionOf, spliceSection, normalizeOutput, looksLikeBrief, looksLikeStatus, splitBrief,
+  linkifyTickets,
 } from '../src/briefformat.js';
 
 // The shape the generator is asked to produce. Kept here verbatim so a change to
@@ -167,6 +168,48 @@ describe('splitBrief', () => {
     const s = splitBrief(legacy);
     expect(s.about.text).toContain('Old prose');
     expect(s.decisions.items).toEqual([{ claim: 'A plain old bullet.', why: '' }]);
+  });
+});
+
+describe('linkifyTickets', () => {
+  const base = 'https://example.atlassian.net/browse/';
+
+  it('turns a bare ticket key into a link to the configured tracker', () => {
+    expect(linkifyTickets('ACME-42', base))
+      .toBe('[ACME-42](https://example.atlassian.net/browse/ACME-42)');
+    expect(linkifyTickets('blocked on ACME-42 and ACME-9', base))
+      .toBe('blocked on [ACME-42](https://example.atlassian.net/browse/ACME-42) '
+        + 'and [ACME-9](https://example.atlassian.net/browse/ACME-9)');
+  });
+
+  it('repairs a link whose target is a bare ticket id, not a URL', () => {
+    // The generator wrote `[PLAT-1](PLAT-1)`, which the browser resolves against
+    // the dashboard's own origin and navigates nowhere.
+    expect(linkifyTickets('[ACME-42](ACME-42)', base))
+      .toBe('[ACME-42](https://example.atlassian.net/browse/ACME-42)');
+    expect(linkifyTickets('- [Ticket ACME-42](ACME-42)', base))
+      .toBe('- [Ticket ACME-42](https://example.atlassian.net/browse/ACME-42)');
+  });
+
+  it('leaves a key that is already a link alone', () => {
+    // Otherwise the label gets rewritten into a nested link and marked breaks.
+    const already = '[ACME-42](https://example.atlassian.net/browse/ACME-42)';
+    expect(linkifyTickets(already, base)).toBe(already);
+    expect(linkifyTickets('[see ACME-42 here](https://example.com/x)', base))
+      .toBe('[see ACME-42 here](https://example.com/x)');
+  });
+
+  it('leaves keys inside code spans alone', () => {
+    expect(linkifyTickets('run `git log ACME-42`', base)).toBe('run `git log ACME-42`');
+  });
+
+  it('does nothing without a configured tracker, rather than inventing a URL', () => {
+    expect(linkifyTickets('ACME-42', '')).toBe('ACME-42');
+    expect(linkifyTickets('ACME-42', undefined)).toBe('ACME-42');
+  });
+
+  it('ignores things that only look like keys', () => {
+    expect(linkifyTickets('UTF-8 and COVID-19 and A-1', base)).toBe('UTF-8 and COVID-19 and A-1');
   });
 });
 

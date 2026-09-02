@@ -163,6 +163,42 @@ export function splitBrief(body) {
   };
 }
 
+// A ticket key is structurally indistinguishable from `UTF-8`, `RFC-7231` or
+// `COVID-19`, so shape alone cannot decide it. These are the standards and
+// encodings that actually turn up in engineering prose; anything else that looks
+// like a key is assumed to be one.
+const NOT_TICKETS = new Set([
+  'UTF', 'UTF8', 'ISO', 'RFC', 'SHA', 'MD', 'UTC', 'GMT', 'IPV', 'HTTP', 'TLS',
+  'SSL', 'AES', 'RSA', 'COVID', 'ASCII', 'ES', 'IEEE', 'ANSI', 'PEP', 'CVE',
+]);
+const TICKET_KEY = /\b([A-Z][A-Z0-9]{1,})-(\d+)\b/g;
+// Segments that must be left alone: an existing markdown link, or a code span.
+// Splitting on these and only rewriting the gaps avoids nested links, which
+// marked renders as broken markup.
+const PROTECTED = /(\[[^\]]*\]\([^)]*\)|`[^`]*`)/;
+
+/**
+ * Bare ticket keys become links to the configured tracker. The generator is told
+ * to emit a full URL or plain text, but a key on its own is still the natural
+ * thing to write, and resolving it here beats a link that goes nowhere.
+ * Without a configured base this is a no-op — an unlinked key beats a wrong URL.
+ */
+export function linkifyTickets(text, jiraBase) {
+  const base = String(jiraBase ?? '');
+  if (!base) return String(text ?? '');
+  return String(text ?? '')
+    // First repair links the generator built with an id as the target. Those are
+    // already markdown links, so the pass below would skip them, and a browser
+    // resolves them against the dashboard's own origin.
+    .replace(/\[([^\]]*)\]\(([A-Z][A-Z0-9]{1,}-\d+)\)/g,
+      (whole, label, key) => (NOT_TICKETS.has(key.split('-')[0]) ? whole : `[${label}](${base}${key})`))
+    .split(PROTECTED)
+    .map((part, i) => (i % 2 // odd indexes are the protected captures
+      ? part
+      : part.replace(TICKET_KEY, (key, prefix) => (NOT_TICKETS.has(prefix) ? key : `[${key}](${base}${key})`))))
+    .join('');
+}
+
 /** A whole brief: the stable opening section plus a status. */
 export function looksLikeBrief(body) {
   return String(body ?? '').startsWith('## About') && hasSection(body, 'Status');

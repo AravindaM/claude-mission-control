@@ -6,7 +6,7 @@ import {
 } from './taskstore.js';
 import { ingestSpool, applySpoolEvent, writeBindings, attachSession, JIRA_KEY } from './spool.js';
 import { resolveBinding } from './binding.js';
-import { splitBrief } from './briefformat.js';
+import { splitBrief, linkifyTickets } from './briefformat.js';
 import { slugify } from './paths.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -173,7 +173,16 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     const body = getBrief(ctx, id);
     // `sections` is what the detail panel renders; `body` stays for the raw view
     // and for any brief still in a format the splitter finds nothing in.
-    return { body, sections: splitBrief(body) };
+    // Bare ticket keys become tracker links here rather than in the dashboard,
+    // because jiraBase is server config and the resolution has tests.
+    const sections = splitBrief(body);
+    const base = config.jiraBase;
+    if (base) {
+      sections.links.items = sections.links.items.map((i) => linkifyTickets(i, base));
+      sections.status.fields = sections.status.fields.map(
+        (f) => ({ ...f, value: linkifyTickets(f.value, base) }));
+    }
+    return { body, sections };
   });
 
   // Per-tile "refresh context": force-regenerate the brief from the task's

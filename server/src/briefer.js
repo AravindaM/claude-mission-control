@@ -89,7 +89,10 @@ systems. The second names what you are changing it to.>
   you would never re-litigate but might accidentally violate.>
 
 ## Links
-- [<label, max 5 words>](<url or id>)
+- [<label, max 5 words>](<the full URL, starting with https://>)
+A markdown link MUST contain a real URL. If you only have a ticket id and no
+URL, write the id as plain text with no brackets — a link whose target is an id
+resolves against the dashboard's own address and goes nowhere.
 
 At most 5 Decisions and 6 Invariants. A choice you would never revisit is an
 Invariant, not a Decision. A mere consequence of another decision is neither —
