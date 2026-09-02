@@ -199,6 +199,36 @@ export function linkifyTickets(text, jiraBase) {
     .join('');
 }
 
+const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
+// A link earns a place in a brief only if it is somewhere you would go back to.
+// Everything a session reads — docs, Stack Overflow, blog posts — is noise here.
+const WORTH_KEEPING = [
+  /\/pull\/\d+/, /\/issues\/\d+/, /\/browse\/[A-Z][A-Z0-9]+-\d+/,
+  /\/compare\//, /\/releases\//, /\/actions\/runs\/\d+/,
+  /grafana|kibana|datadog|sentry|dashboard/i,
+];
+const HARVEST_CAP = 20;
+
+/**
+ * URLs worth reopening, pulled straight out of the conversation.
+ *
+ * The generator kept dropping PR links it had plainly seen — the Links rules ban
+ * "an inventory of the repositories touched", and a PR URL contains a repo name,
+ * so it read the two as conflicting. Extracting them mechanically removes the
+ * judgement call: the model is handed the list and only decides what to label.
+ */
+export function harvestLinks(text) {
+  const seen = new Set();
+  for (const raw of String(text ?? '').match(URL_RE) ?? []) {
+    // Prose and markdown glue punctuation onto the end of a bare URL.
+    const url = raw.replace(/[.,;:!?)\]}>'"]+$/, '');
+    if (!WORTH_KEEPING.some((re) => re.test(url))) continue;
+    seen.add(url);
+    if (seen.size >= HARVEST_CAP) break;
+  }
+  return [...seen];
+}
+
 /** A whole brief: the stable opening section plus a status. */
 export function looksLikeBrief(body) {
   return String(body ?? '').startsWith('## About') && hasSection(body, 'Status');

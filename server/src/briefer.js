@@ -9,12 +9,17 @@ import { writeBindings, attachSession } from './spool.js';
 import { extractConversation, countTurns, extractTurnsSince } from './transcript.js';
 import {
   hasSection, sectionOf, spliceSection, normalizeOutput, looksLikeBrief, looksLikeStatus,
+  harvestLinks,
 } from './briefformat.js';
 
 const MAX_OUTPUT_BYTES = 100_000;
 // Shared across every due session of a task. Only the turns since the last brief
 // travel, so this buys far more history than the old 200KB whole-tail budget did.
 const TAIL_BUDGET_BYTES = 60_000;
+// About runs rarely and must see the whole arc of a task, so it can afford far
+// more than the hot Status path. At 60KB it was dropping 40% of a long session's
+// turns, taking the PR links with them.
+const ABOUT_BUDGET_BYTES = 200_000;
 // Archive is the one place worth paying for a large prompt: the brief becomes the
 // task's only surviving record, so it gets the whole history it can afford.
 const FINALIZE_BUDGET_BYTES = 200_000;
@@ -106,7 +111,9 @@ address you could open, it is not a link. Never write there:
   reader is already looking at it.
 - file or directory paths, or a "Key files" list. Git answers that, and listing
   it turns the brief into a changelog.
-- commit hashes, or an inventory of the repositories touched.
+- commit hashes, or a bare list of repository names with nothing to open.
+  A pull-request or issue URL is NOT a repository inventory — it is exactly the
+  kind of link this section exists for. Always keep every PR and issue URL.
 - opaque execution or run ids with nothing to open them in.
 Drop any of those already present rather than carrying them forward.
 
@@ -211,8 +218,9 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
 
   // Only the turns added since each session's watermark: the brief already
   // carries everything older, so resending it pays for tokens twice.
-  function sliceFor(sessions, force) {
-    const budget = Math.floor((config.tailBudgetBytes ?? TAIL_BUDGET_BYTES) / sessions.length);
+  function sliceFor(sessions, force, totalBudget = null) {
+    const budget = Math.floor(
+      (totalBudget ?? config.tailBudgetBytes ?? TAIL_BUDGET_BYTES) / sessions.length);
     return sessions.map((session) => ({
       session,
       // A forced refresh is a human asking "re-read this": start from scratch
@@ -232,8 +240,16 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
   }
 
   function aboutPrompt(task, slices) {
+    const conversation = conversationOf(slices);
+    // Handed to the model rather than left for it to notice. Deterministic
+    // extraction is the only reliable way to keep PR links out of the gaps.
+    const found = harvestLinks(`${getBrief(ctx, task.id)}\n${conversation}`);
+    const candidates = found.length
+      ? `\n\nLINKS FOUND IN THIS MATERIAL (include every one that is still relevant, `
+        + `each with a short label):\n${found.map((u) => `- ${u}`).join('\n')}`
+      : '';
     return `CURRENT BRIEF:\n${getBrief(ctx, task.id)}${planSectionFor(task)}`
-      + `\n\nCONVERSATION:\n${conversationOf(slices)}\n\n${ABOUT_INSTRUCTION}`;
+      + `\n\nCONVERSATION:\n${conversation}${candidates}\n\n${ABOUT_INSTRUCTION}`;
   }
 
   // Deliberately NOT given ## Decisions: it is the largest section, and doubling
@@ -329,7 +345,9 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
     // `about` is the explicit request — the only way back from an About that has
     // gone stale or absorbed progress it should never have carried.
     // An About failure is not fatal: statusPrompt falls back to the whole brief.
-    if (about || !hasSection(getBrief(ctx, taskId), 'About')) await aboutPass(task, slices, last);
+    if (about || !hasSection(getBrief(ctx, taskId), 'About')) {
+      await aboutPass(task, sliceFor(sessions, force, ABOUT_BUDGET_BYTES), last);
+    }
     if (!await statusPass(task, slices, last)) return; // watermarks held for the retry
 
     const mark = ctx.db.prepare(`

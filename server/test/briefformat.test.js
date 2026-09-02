@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasSection, sectionOf, spliceSection, normalizeOutput, looksLikeBrief, looksLikeStatus, splitBrief,
-  linkifyTickets,
+  linkifyTickets, harvestLinks,
 } from '../src/briefformat.js';
 
 // The shape the generator is asked to produce. Kept here verbatim so a change to
@@ -210,6 +210,47 @@ describe('linkifyTickets', () => {
 
   it('ignores things that only look like keys', () => {
     expect(linkifyTickets('UTF-8 and COVID-19 and A-1', base)).toBe('UTF-8 and COVID-19 and A-1');
+  });
+});
+
+describe('harvestLinks', () => {
+  it('pulls PR and issue URLs out of raw conversation text', () => {
+    const text = 'opened https://github.com/acme/api/pull/96 and closed '
+      + 'https://github.com/acme/web/issues/12 yesterday';
+    expect(harvestLinks(text)).toEqual([
+      'https://github.com/acme/api/pull/96',
+      'https://github.com/acme/web/issues/12',
+    ]);
+  });
+
+  it('deduplicates, since a PR gets mentioned dozens of times in one session', () => {
+    const text = 'https://github.com/acme/api/pull/96 ... https://github.com/acme/api/pull/96';
+    expect(harvestLinks(text)).toEqual(['https://github.com/acme/api/pull/96']);
+  });
+
+  it('keeps tracker and dashboard URLs but drops ordinary reading', () => {
+    const text = 'see https://acme.atlassian.net/browse/ACME-1 and '
+      + 'https://grafana.acme.com/d/abc/overview but not https://stackoverflow.com/q/123 '
+      + 'or https://nodejs.org/api/fs.html';
+    expect(harvestLinks(text)).toEqual([
+      'https://acme.atlassian.net/browse/ACME-1',
+      'https://grafana.acme.com/d/abc/overview',
+    ]);
+  });
+
+  it('strips trailing punctuation that markdown or prose glued on', () => {
+    expect(harvestLinks('(https://github.com/acme/api/pull/96).'))
+      .toEqual(['https://github.com/acme/api/pull/96']);
+  });
+
+  it('caps the list so a noisy transcript cannot flood the prompt', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `https://github.com/acme/api/pull/${i}`).join(' ');
+    expect(harvestLinks(many).length).toBe(20);
+  });
+
+  it('returns nothing for text with no links', () => {
+    expect(harvestLinks('no links here at all')).toEqual([]);
+    expect(harvestLinks('')).toEqual([]);
   });
 });
 
