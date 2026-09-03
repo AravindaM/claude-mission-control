@@ -12,6 +12,8 @@ import { slugify } from './paths.js';
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const TEN_MINUTES = 10 * 60 * 1000;
 const TWO_DAYS = 48 * 60 * 60 * 1000;
+// /task verbs. Reserved words, checked before a ref is resolved.
+const VERBS = new Set(['show', 'done', 'archive']);
 
 export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, staticRoot = null }) {
   const app = Fastify({ logger: false });
@@ -71,7 +73,14 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     if (!getSession(req.body.session_id)) applySpoolEvent(ctx, req.body);
     const session = getSession(req.body.session_id);
     let bindingResult = null;
-    if (session.task_id == null) {
+    // `cmc continue` exports MC_TASK, which the hook passes through. An explicit
+    // name beats repo matching, which declines whenever several tasks share a
+    // directory — the normal case for work rooted in one parent folder.
+    if (session.task_id == null && req.body.mc_task) {
+      const named = resolveTaskRef(String(req.body.mc_task).trim());
+      if (named.task) attachSession(ctx, req.body.session_id, named.task.id, 'explicit', Date.now());
+    }
+    if (getSession(req.body.session_id).task_id == null) {
       bindingResult = resolveBinding(req.body, {
         openTasks: ctx.db.prepare(`
           SELECT t.id, t.repo_path,
@@ -83,8 +92,9 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     }
     writeBindings(ctx);
     broadcast();
-    const brief = session.task_id != null ? getBrief(ctx, session.task_id) : null;
-    return { status_line: statusLineFor(session, bindingResult), brief };
+    const bound = getSession(req.body.session_id);
+    const brief = bound.task_id != null ? getBrief(ctx, bound.task_id) : null;
+    return { status_line: statusLineFor(bound, bindingResult), brief };
   });
 
   app.post('/api/hooks/prompt', (req) => {
@@ -260,6 +270,30 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     }
     const ref = (req.body.ref ?? '').trim();
 
+    // Verbs are checked before ref resolution, so a task whose name merely
+    // contains "done" cannot shadow them. A task actually named after a verb is
+    // still reachable by its full slug, which never equals a bare verb.
+    if (VERBS.has(ref.toLowerCase())) {
+      if (session.task_id == null) {
+        return { action: 'error', message: `this session is not bound to a task — /task <name> first` };
+      }
+      const task = getTask(ctx, session.task_id);
+      if (ref.toLowerCase() === 'show') {
+        return { action: 'shown', slug: task.slug, brief: getBrief(ctx, task.id) };
+      }
+      if (ref.toLowerCase() === 'done') {
+        updateTask(ctx, task.id, { status: 'done' });
+        broadcast();
+        return { action: 'done', slug: task.slug };
+      }
+      // archive: the closing brief is written before any transcript is deleted,
+      // and finalize refuses to delete if it cannot write one.
+      archiveTask(ctx, task.id);
+      briefer?.finalize(task.id).then(() => broadcast()).catch(() => {});
+      broadcast();
+      return { action: 'archived', slug: task.slug };
+    }
+
     if (ref) {
       const resolved = resolveTaskRef(ref);
       if (resolved.candidates) {
@@ -275,7 +309,9 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
       attachSession(ctx, uuid, task.id, 'explicit', Date.now());
       writeBindings(ctx);
       broadcast();
-      return { action: resolved.task ? 'bound' : 'created', task };
+      // The brief travels with the bind: this is the only way a session that
+      // cannot be matched by repo gets its task's context.
+      return { action: resolved.task ? 'bound' : 'created', task, brief: getBrief(ctx, task.id) };
     }
 
     if (session.task_id != null) {

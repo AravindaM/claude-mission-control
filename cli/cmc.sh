@@ -27,6 +27,35 @@ cmc() {
       fi
       ;;
 
+    continue|cont)
+      # Same task, new session. `resume` reloads a whole transcript; this carries
+      # only the brief, which is the point — a clean context window that still
+      # knows what it is working on. MC_TASK binds it, since a directory holding
+      # several tasks cannot be matched by repo.
+      local query="${2:-}" state line slug repo
+      state=$(curl -s --max-time 2 "$api/api/state" 2>/dev/null)
+      if [ -z "$state" ]; then echo "cmc: server down — start it with: cmcctl start" >&2; return 1; fi
+      line=$(printf '%s' "$state" | jq -r --arg q "$query" '
+        .tasks[] | select(.archived == 0) | select(.slug | contains($q)) |
+        [.slug, (.repo_path // .last_cwd // "")] | @tsv')
+      if [ -z "$line" ]; then echo "cmc: no task matches '$query'" >&2; return 1; fi
+      if [ "$(printf '%s\n' "$line" | wc -l | tr -d ' ')" -gt 1 ]; then
+        if command -v fzf >/dev/null 2>&1; then
+          line=$(printf '%s\n' "$line" | fzf --with-nth=1 --height=40%)
+        else
+          printf '%s\n' "$line" | nl -w2 -s') ' | cut -f1 >&2
+          printf 'pick #: ' >&2; local n; read -r n
+          line=$(printf '%s\n' "$line" | sed -n "${n}p")
+        fi
+      fi
+      [ -z "$line" ] && return 1
+      slug=$(printf '%s' "$line" | cut -f1)
+      repo=$(printf '%s' "$line" | cut -f2)
+      if [ -n "$repo" ] && [ -d "$repo" ]; then cd "$repo" || return 1; fi
+      echo "cmc: continuing $slug in a NEW session (brief only) in ${repo:-$PWD}"
+      MC_TASK="$slug" claude
+      ;;
+
     resume)
       local query="${2:-}" state line slug repo sid transcript
       state=$(curl -s --max-time 2 "$api/api/state" 2>/dev/null)
@@ -53,12 +82,16 @@ cmc() {
       sid=$(printf '%s' "$line" | cut -f3)
       transcript=$(printf '%s' "$line" | cut -f4)
       if [ -n "$repo" ] && [ -d "$repo" ]; then cd "$repo" || return 1; fi
-      echo "cmc: resuming $slug in ${repo:-$PWD}"
-      # Existence check, not date math: --resume only if the live transcript survives.
+      # Existence check, not date math: --resume only if the live transcript
+      # survives. Which mode you get changes the context cost by ~100x, so say it
+      # rather than deciding silently.
       if [ -n "$sid" ] && [ -n "$transcript" ] && [ -f "$transcript" ]; then
+        echo "cmc: reopening $slug — full session, in ${repo:-$PWD}"
         claude --resume "$sid"
       else
-        claude   # brief auto-injects via the SessionStart hook
+        echo "cmc: $slug has no stored session left — starting a new one with its brief"
+        echo "     (this is what 'cmc continue $slug' does deliberately)"
+        MC_TASK="$slug" claude
       fi
       ;;
 
@@ -75,7 +108,13 @@ cmc() {
       ;;
 
     *)
-      echo "usage: cmc ls | cmc resume [query] | cmc digest" >&2
+      cat >&2 <<'USAGE'
+usage:
+  cmc ls                  list active tasks
+  cmc resume <task>       reopen that task's last session — full context
+  cmc continue <task>     new session carrying only the task's brief
+  cmc digest              print every active brief
+USAGE
       return 2
       ;;
   esac

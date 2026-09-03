@@ -20,8 +20,13 @@ BR=$(cd "$CWD" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 # last_assistant_message is dropped outright: Stop fires after every response, the
 # server never reads it, and ingest does a full readFileSync of the spool on every
 # hook event — keeping whole responses would make that quadratic.
+# MC_TASK is set by `cmc continue`: it names the task this session should bind to.
+# Repo matching cannot serve a directory holding several tasks, so an explicit
+# name is the only thing that can bind a fresh session there.
 LINE=$(printf '%s' "$IN" | jq -c --arg top "$TOP" --arg br "$BR" --arg ts "$(date +%s)" \
+  --arg mct "${MC_TASK:-}" \
   '. + {repo_toplevel:$top, git_branch:$br, ts:($ts|tonumber)}
+   | (if $mct == "" then . else . + {mc_task:$mct} end)
    | del(.last_assistant_message)
    | if .prompt then .prompt = (.prompt | .[0:2000]) else . end' 2>/dev/null)
 [ -z "$LINE" ] && exit 0

@@ -250,6 +250,98 @@ describe('api', () => {
     expect(res2.json().queued).toBe(false);
   });
 
+  it('binding to an existing task hands back its brief, so a new session can carry it', async () => {
+    // The whole point of the handoff: /task <ref> must deliver context, not just
+    // relink. Repo auto-match is the only other path that injects a brief, and it
+    // refuses when several tasks share a directory.
+    const { id } = (await post('/api/tasks', { title: 'Carry Me' })).json();
+    await post(`/api/tasks/${id}/brief`, { body: '## About\nthe scope\n\n## Status\n- Now: halfway', source: 'manual' });
+    await post('/api/hooks/session-start', startEvent({ session_id: 'h-1' }));
+
+    const res = await post('/api/sessions/h-1/task', { ref: 'carry' });
+    expect(res.json()).toMatchObject({ action: 'bound' });
+    expect(res.json().brief).toContain('the scope');
+    expect(res.json().brief).toContain('Now: halfway');
+  });
+
+  it('a session started with MC_TASK binds by name instead of guessing from the repo', async () => {
+    // Several tasks can share one directory, so repo matching declines. An
+    // explicit name is the only thing that can bind a fresh session.
+    const { id } = (await post('/api/tasks', { title: 'Named Bind' })).json();
+    await post(`/api/tasks/${id}/brief`, { body: '## About\nnamed scope\n\n## Status\n- Now: x', source: 'manual' });
+
+    const res = await post('/api/hooks/session-start', startEvent({ session_id: 'env-1', mc_task: 'named' }));
+    expect(res.json().status_line).toContain('attached to named-bind');
+    expect(res.json().brief).toContain('named scope');
+    expect(ctx.db.prepare("SELECT task_id FROM sessions WHERE session_uuid='env-1'").get().task_id).toBe(id);
+  });
+
+  it('an MC_TASK naming nothing leaves the session unbound rather than inventing a task', async () => {
+    const res = await post('/api/hooks/session-start', startEvent({ session_id: 'env-2', mc_task: 'no-such-task' }));
+    expect(res.json().brief).toBeNull();
+    expect(ctx.db.prepare("SELECT task_id FROM sessions WHERE session_uuid='env-2'").get().task_id).toBeNull();
+  });
+
+  it('/task show returns the brief without changing anything', async () => {
+    const { id } = (await post('/api/tasks', { title: 'Readable' })).json();
+    await post(`/api/tasks/${id}/brief`, { body: '## About\nreadable scope\n\n## Status\n- Now: y', source: 'manual' });
+    await post('/api/hooks/session-start', startEvent({ session_id: 's-show' }));
+    await post('/api/sessions/s-show/task', { ref: 'readable' });
+
+    const res = await post('/api/sessions/s-show/task', { ref: 'show' });
+    expect(res.json()).toMatchObject({ action: 'shown', slug: 'readable' });
+    expect(res.json().brief).toContain('readable scope');
+    expect(ctx.db.prepare('SELECT status, archived FROM tasks WHERE id = ?').get(id))
+      .toMatchObject({ status: 'explore', archived: 0 });
+  });
+
+  it('/task done marks the task done and leaves its transcripts alone', async () => {
+    const { id } = (await post('/api/tasks', { title: 'Finish Me' })).json();
+    await post('/api/hooks/session-start', startEvent({ session_id: 's-done' }));
+    await post('/api/sessions/s-done/task', { ref: 'finish' });
+
+    const res = await post('/api/sessions/s-done/task', { ref: 'done' });
+    expect(res.json()).toMatchObject({ action: 'done', slug: 'finish-me' });
+    expect(ctx.db.prepare('SELECT status, archived FROM tasks WHERE id = ?').get(id))
+      .toMatchObject({ status: 'done', archived: 0 });
+  });
+
+  it('/task archive closes the task out through the same path as the board', async () => {
+    const finalized = [];
+    await app.close();
+    app = buildApp({
+      ctx,
+      config,
+      briefer: { enqueue: () => {}, nameTask: async () => null, sweep: () => {},
+        finalize: async (tid) => { finalized.push(tid); return true; } },
+      heartbeatMs: 40,
+    });
+    const { id } = (await post('/api/tasks', { title: 'Wrap Up' })).json();
+    await post('/api/hooks/session-start', startEvent({ session_id: 's-arch' }));
+    await post('/api/sessions/s-arch/task', { ref: 'wrap' });
+
+    const res = await post('/api/sessions/s-arch/task', { ref: 'archive' });
+    expect(res.json()).toMatchObject({ action: 'archived', slug: 'wrap-up' });
+    expect(ctx.db.prepare('SELECT archived FROM tasks WHERE id = ?').get(id).archived).toBe(1);
+    expect(finalized).toEqual([id]); // closing brief written before transcripts go
+  });
+
+  it('a verb on an unbound session says so instead of creating a task called "done"', async () => {
+    await post('/api/hooks/session-start', startEvent({ session_id: 's-none' }));
+    const res = await post('/api/sessions/s-none/task', { ref: 'done' });
+    expect(res.json().action).toBe('error');
+    expect(res.json().message).toMatch(/not bound/i);
+    expect(ctx.db.prepare("SELECT COUNT(*) c FROM tasks WHERE slug='done'").get().c).toBe(0);
+  });
+
+  it('a real task whose name collides with a verb is still reachable by full slug', async () => {
+    const { id } = (await post('/api/tasks', { title: 'done deal cleanup' })).json();
+    await post('/api/hooks/session-start', startEvent({ session_id: 's-collide' }));
+    const res = await post('/api/sessions/s-collide/task', { ref: 'done-deal-cleanup' });
+    expect(res.json()).toMatchObject({ action: 'bound' });
+    expect(res.json().task.id).toBe(id);
+  });
+
   it('the timeline hides routine brief saves so real history is not buried', async () => {
     // Status refreshes run every few minutes, so brief_saved would consume the
     // whole limit and push out the events that describe what happened to the task.

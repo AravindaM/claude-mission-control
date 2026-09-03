@@ -132,6 +132,32 @@ check "exit 0" "$RC"
 grep -q '"session_id":"s10"' "$MC_DATA_DIR/_spool/events.jsonl"; check "spooled while server down" "$?"
 [ "$ELAPSED" -le 4 ]; check "completed fast (${ELAPSED}s)" "$?"
 
+echo "case: MC_TASK is passed through so the server can bind by name"
+fresh
+PORT=48995
+CAPTURE="$WORK/capture.jsonl"; : > "$CAPTURE"
+node "$STUB" $PORT "$CAPTURE" >/dev/null 2>&1 &
+STUB_PID=$!
+sleep 0.5
+export MC_PORT=$PORT
+OUT=$(start_payload s11 startup | MC_TASK=my-task sh "$HOOK")
+grep -q '"mc_task":"my-task"' "$CAPTURE"; check "mc_task reached the server" "$?"
+grep -q '"mc_task":"my-task"' "$MC_DATA_DIR/_spool/events.jsonl"; check "mc_task spooled too" "$?"
+echo "$OUT" | grep -q "Task brief"; check "brief still injected" "$?"
+kill $STUB_PID 2>/dev/null
+
+echo "case: no MC_TASK — the field is absent, not empty"
+fresh
+PORT=48996
+CAPTURE="$WORK/capture.jsonl"; : > "$CAPTURE"
+node "$STUB" $PORT "$CAPTURE" >/dev/null 2>&1 &
+STUB_PID=$!
+sleep 0.5
+export MC_PORT=$PORT
+start_payload s12 startup | sh "$HOOK" >/dev/null
+grep -q 'mc_task' "$CAPTURE"; [ "$?" -ne 0 ]; check "no mc_task key when unset" "$?"
+kill $STUB_PID 2>/dev/null
+
 echo "case: oversized brief truncated to 8KB"
 fresh
 PORT=48992
