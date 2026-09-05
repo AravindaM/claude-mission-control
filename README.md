@@ -32,8 +32,9 @@ when two tasks could match — a wrong attach poisons a brief.
 `BRIEF.md`: what the task is, where it stands, what was decided, and where to look.
 It regenerates as you work — only the volatile part, so it stays cheap.
 
-**Resumes with context.** `cmc resume <task>` drops you back in the right repo, and
-the `SessionStart` hook feeds the brief into the new session automatically.
+**Resumes with context.** `cmc resume <task>` reopens the task's last session with its
+whole transcript; `cmc continue <task>` starts a fresh one carrying only the brief. Both
+drop you in the right repo, and the `SessionStart` hook feeds the brief in automatically.
 
 ---
 
@@ -49,7 +50,7 @@ the `SessionStart` hook feeds the brief into the new session automatically.
 ## Install
 
 ```sh
-git clone <your-fork-url> claude-mission-control
+git clone https://github.com/AravindaM/claude-mission-control.git
 cd claude-mission-control
 sh install/install.sh
 ```
@@ -93,10 +94,19 @@ rm ~/.claude/skills/task ~/.local/bin/cmcctl
 | Track the session you're in | `/task auth-rate-limit` (in Claude) |
 | Bind to an existing task | `/task auth` — substring match, refuses if ambiguous |
 | Save a brief right now | `/task` with no argument |
+| Read the current brief | `/task show` |
+| Mark a task done | `/task done` |
+| Close a task out | `/task archive` — writes a final brief, then deletes its transcripts |
 | See everything | `cmc ls`, or the dashboard |
-| Resume a task | `cmc resume auth-rate-limit` |
+| Pick a task back up | `cmc resume auth-rate-limit` — the last session, whole transcript |
+| Start clean on the same task | `cmc continue auth-rate-limit` — new session, brief only |
 | Read all briefs in the terminal | `cmc digest` |
 | Check the server | `cmcctl status` / `cmcctl logs` |
+
+`resume` and `continue` both take a substring, and offer you the matches when more than
+one task fits. They differ by about 100x in context cost, so they say which one you got
+rather than deciding quietly — and `resume` falls back to `continue`'s behaviour when
+the transcript is already gone.
 
 `/task` is fire-and-forget — a single background `curl` that never blocks your
 session. On a repo it already recognises, sessions attach on their own and you never
@@ -111,15 +121,20 @@ archive or trash.
 
 ### The brief
 
-Each task's `~/claude-tasks/<task>/BRIEF.md` has four sections on two different
+Each task's `~/claude-tasks/<task>/BRIEF.md` has five sections on two different
 cadences, which is what keeps regeneration cheap:
 
 - **About** — why the task exists and what's changing. Stable; rewritten only when
   you press `↻ rewrite`.
 - **Status** — Now / Next / Blockers, plus which branch the code is on and how the
   PRs look. Regenerated as you work.
+- **Links** — things you would actually open: PRs, tickets, dashboards. URLs are pulled
+  out of the transcript directly rather than left to the model to remember.
 - **Decisions** — choices you might otherwise re-litigate, each with its reason.
 - **Invariants** — rules you might break by accident. No reasons, just the rule.
+
+They stay in that order everywhere — the file, the detail panel and the digest — so
+you read what the task is, where it stands, then where to go next.
 
 They're plain markdown with YAML frontmatter, so they're greppable and readable
 without the server running. Every save keeps the previous version in
@@ -150,7 +165,7 @@ Environment overrides: `MC_PORT`, `MC_DATA_DIR`.
 ```
 ~/claude-tasks/
 ├── <task-slug>/
-│   ├── BRIEF.md            # frontmatter + the four sections
+│   ├── BRIEF.md            # frontmatter + the five sections
 │   ├── briefs/             # every previous version
 │   └── transcripts/        # session transcripts, copied on SessionEnd
 ├── _unbound/               # transcripts from sessions with no task
@@ -185,7 +200,7 @@ sensitive, that directory deserves the same care as the repos themselves.
 
 ```sh
 npm install
-npm test                      # 121 vitest tests
+npm test                      # 142 vitest tests
 sh hooks/test/hook.test.sh    # hook contract tests (shell)
 npm start                     # run the server in the foreground
 cd dashboard && npm run dev   # dashboard with HMR against a running server

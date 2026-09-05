@@ -84,6 +84,12 @@ systems. The second names what you are changing it to.>
 - <a literal invocation worth not re-deriving from scrollback. Omit this group if
   the transcript contains none.>
 
+## Links
+- [<label, max 5 words>](<the full URL, starting with https://>)
+A markdown link MUST contain a real URL. If you only have a ticket id and no
+URL, write the id as plain text with no brackets — a link whose target is an id
+resolves against the dashboard's own address and goes nowhere.
+
 ## Decisions
 - **<the choice itself, max 15 words. No reason on this line.>**
   Why: <max 25 words. Include this line ONLY if you would re-make the choice
@@ -92,12 +98,6 @@ systems. The second names what you are changing it to.>
 ## Invariants
 - <a rule that must not be broken, one line, max 20 words, and NO reason. A thing
   you would never re-litigate but might accidentally violate.>
-
-## Links
-- [<label, max 5 words>](<the full URL, starting with https://>)
-A markdown link MUST contain a real URL. If you only have a ticket id and no
-URL, write the id as plain text with no brackets — a link whose target is an id
-resolves against the dashboard's own address and goes nowhere.
 
 At most 5 Decisions and 6 Invariants. A choice you would never revisit is an
 Invariant, not a Decision. A mere consequence of another decision is neither —
@@ -157,7 +157,7 @@ ${STYLE}`;
 // whole document rather than patching one section of it.
 const FINALIZE_INSTRUCTION = `${ABOUT_INSTRUCTION}
 
-ADDITIONALLY: also output a "## Status" section (between About and Decisions)
+ADDITIONALLY: also output a "## Status" section (between About and Links)
 recording the final state of the work. This task is being ARCHIVED and its
 transcripts deleted, so this brief becomes the only surviving record. Make it
 self-contained: relax the caps to 10 Decisions and every ticket, PR, dashboard

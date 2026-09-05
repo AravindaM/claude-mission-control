@@ -1,7 +1,11 @@
-// Pure text handling for BRIEF.md bodies. A brief is four `## ` sections on two
-// cadences: About/Decisions/Links are stable and regenerated rarely, Status is
-// rewritten often. Keeping the two apart is what makes frequent updates cheap —
-// a Status refresh emits ~230 tokens instead of rewriting ~2,800.
+// Pure text handling for BRIEF.md bodies. A brief is five `## ` sections in a
+// fixed order — About, Status, Links, Decisions, Invariants — on two cadences:
+// everything but Status is stable and regenerated rarely, Status is rewritten
+// often. Keeping the two apart is what makes frequent updates cheap — a Status
+// refresh emits ~230 tokens instead of rewriting ~2,800.
+//
+// The order is what the reader needs in sequence: what this is, where it stands,
+// where to go next. Links sits third because it is the section you act on.
 
 const HEADING = /^## /;
 const STATUS_MAX_BYTES = 4_000;
