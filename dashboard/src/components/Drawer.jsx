@@ -253,8 +253,23 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
 
         {!raw && (
           <>
-            {/* Status is the lit panel: it is the section that changes constantly,
-                and the question the drawer is opened to answer. */}
+            {/* About, Status, Links — what the task is, where it stands, where to
+                go next. The drawer follows BRIEF.md's own order, so reading the
+                panel and reading the file are the same experience. */}
+            <section>
+              <SectionLabel
+                action={<RefreshButton task={task} about disabled={noSession} tip="rewrite scope, decisions and links">↻ rewrite</RefreshButton>}>
+                ABOUT
+              </SectionLabel>
+              {s?.about.text
+                ? <div className="brief-md" dangerouslySetInnerHTML={{ __html: renderBrief(s.about.text) }} />
+                : <Empty>{noSession ? 'nothing to summarise yet' : 'no scope written yet — press ↻ rewrite'}</Empty>}
+              <Rows fields={s?.about.fields} />
+              <Groups groups={s?.about.groups} />
+            </section>
+
+            {/* Still the lit panel: it is the section that changes constantly, and
+                the question the drawer is usually opened to answer. */}
             <section className="rounded border border-line bg-raised/60 p-3"
               style={{ borderLeft: `3px solid ${stageColor(task.status)}` }}>
               <SectionLabel action={<RefreshButton task={task} disabled={noSession} tip="refresh status from latest sessions">↻</RefreshButton>}>
@@ -281,18 +296,6 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
               {s?.links.items.length
                 ? <BulletList items={s.links.items} />
                 : <Empty>none recorded</Empty>}
-            </section>
-
-            <section>
-              <SectionLabel
-                action={<RefreshButton task={task} about disabled={noSession} tip="rewrite scope, decisions and links">↻ rewrite</RefreshButton>}>
-                ABOUT
-              </SectionLabel>
-              {s?.about.text
-                ? <div className="brief-md" dangerouslySetInnerHTML={{ __html: renderBrief(s.about.text) }} />
-                : <Empty>{noSession ? 'nothing to summarise yet' : 'no scope written yet — press ↻ rewrite'}</Empty>}
-              <Rows fields={s?.about.fields} />
-              <Groups groups={s?.about.groups} />
             </section>
 
             <section>

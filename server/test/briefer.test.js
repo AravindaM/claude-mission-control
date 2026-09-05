@@ -463,6 +463,31 @@ describe('briefer', () => {
     expect(sectionOf(body, 'Status')).toContain('still going');
   });
 
+  it('an About rewrite leaves the brief in reading order: About, Status, Links, Decisions', async () => {
+    // Status is spliced in before the SECOND heading, so the About pass's own
+    // section order decides where it lands. Emitting Links before Decisions is
+    // what puts Status above Links rather than below Invariants — and the Digest
+    // view renders this file verbatim, so the file's order is the tile's order.
+    const { spawn } = fakeSpawnFactory({
+      outputs: [
+        '## About\nscope\n\n## Links\n- PR #1\n\n## Decisions\n- a choice\n\n## Invariants\n- a rule',
+        '## Status\n- Now: wiring',
+      ],
+    });
+    const briefer = createBriefer({ ctx, config, spawn });
+    insertSession({ uuid: 'ordering' });
+
+    briefer.enqueueTask(task.id, { force: true, about: true });
+    await briefer.drain();
+
+    const body = matter(readFileSync(ctx.paths.briefFile(task.slug), 'utf8')).content;
+    const at = (name) => body.indexOf(`## ${name}`);
+    expect(at('About')).toBeLessThan(at('Status'));
+    expect(at('Status')).toBeLessThan(at('Links'));
+    expect(at('Links')).toBeLessThan(at('Decisions'));
+    expect(at('Decisions')).toBeLessThan(at('Invariants'));
+  });
+
   it('rejects a Status pass that emits a whole brief, keeping the stable sections', async () => {
     // A status pass returning every section has been captured by the transcript;
     // saving it would let it overwrite sections it was never asked to touch.

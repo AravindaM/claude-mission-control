@@ -2,6 +2,29 @@
 # Source from your shell rc:  source <path-to-repo>/cli/cmc.sh
 # Functions (not a script) so `cmc resume` can cd your current shell.
 
+# Claude Code labels a session in its prompt box, its /resume picker and the
+# terminal title. When mission-control starts the session it already knows which
+# task that is, so it says so rather than leaving the derived "<repo>-4c" name.
+# Probed once per shell: an older build rejects the flag outright, and a hard
+# failure of `cmc continue` is a far worse outcome than an unnamed session.
+_cmc_named() {
+  if [ -z "$_CMC_HAS_NAME" ]; then
+    if claude --help 2>/dev/null | grep -q -- '--name <name>'; then
+      _CMC_HAS_NAME=1
+    else
+      _CMC_HAS_NAME=0
+    fi
+  fi
+  [ "$_CMC_HAS_NAME" = 1 ]
+}
+
+# _cmc_claude <slug> [claude args...]
+_cmc_claude() {
+  local slug="$1"
+  shift
+  if _cmc_named; then claude --name "$slug" "$@"; else claude "$@"; fi
+}
+
 cmc() {
   local port="${MC_PORT:-47613}" data="${MC_DATA_DIR:-$HOME/claude-tasks}"
   local api="http://127.0.0.1:$port"
@@ -53,7 +76,7 @@ cmc() {
       repo=$(printf '%s' "$line" | cut -f2)
       if [ -n "$repo" ] && [ -d "$repo" ]; then cd "$repo" || return 1; fi
       echo "cmc: continuing $slug in a NEW session (brief only) in ${repo:-$PWD}"
-      MC_TASK="$slug" claude
+      MC_TASK="$slug" _cmc_claude "$slug"
       ;;
 
     resume)
@@ -87,11 +110,11 @@ cmc() {
       # rather than deciding silently.
       if [ -n "$sid" ] && [ -n "$transcript" ] && [ -f "$transcript" ]; then
         echo "cmc: reopening $slug — full session, in ${repo:-$PWD}"
-        claude --resume "$sid"
+        _cmc_claude "$slug" --resume "$sid"
       else
         echo "cmc: $slug has no stored session left — starting a new one with its brief"
         echo "     (this is what 'cmc continue $slug' does deliberately)"
-        MC_TASK="$slug" claude
+        MC_TASK="$slug" _cmc_claude "$slug"
       fi
       ;;
 
