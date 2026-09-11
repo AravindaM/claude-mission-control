@@ -97,7 +97,8 @@ rm ~/.claude/skills/task ~/.local/bin/cmcctl
 | Read the current brief | `/task show` |
 | Mark a task done | `/task done` |
 | Close a task out | `/task archive` — writes a final brief, then deletes its transcripts |
-| See everything | `cmc ls`, or the dashboard |
+| Decide what to do next | drag cards onto the priority strip, in order |
+| See everything | `cmc ls` — ranked tasks first — or the dashboard |
 | Pick a task back up | `cmc resume auth-rate-limit` — the last session, whole transcript |
 | Start clean on the same task | `cmc continue auth-rate-limit` — new session, brief only |
 | Read all briefs in the terminal | `cmc digest` |
@@ -114,10 +115,36 @@ need to type anything.
 
 ### The board
 
-Seven stages grouped into four columns — **PREP** (explore, plan), **BUILD**
-(development), **VERIFY** (review, testing), **SHIP** (deploy, done). Drag a card
-between columns, or click a segment on its stage strip. Drag to the bottom bar to
-archive or trash.
+Eight stages grouped into five columns — **BACKLOG** (backlog), **PREP** (explore,
+plan), **BUILD** (development), **VERIFY** (review, testing), **SHIP** (deploy, done).
+Drag a card between columns, or click a segment on its stage strip. Drag to the bottom
+bar to archive or trash.
+
+**BACKLOG** is work you have parked on purpose: known, not started. It is never the
+default for a new task — a task exists because a session is working on it, which is
+`explore` at the earliest. You put things in backlog by dragging them there.
+
+Click a task's title in the detail panel to rename it. Enter or clicking away saves,
+Escape cancels. The slug never changes, so `cmc resume <slug>` keeps working.
+
+### The priority stack
+
+The board answers "what stage is everything at". It sorts by liveness and recency, which
+is close to the opposite of importance — a task you have been avoiding for a week sinks to
+the bottom of its column *because* you have been avoiding it.
+
+So the strip above the board answers the other question: **what next**, in order.
+
+- Drag a card onto the strip to prioritise it. Drop it between two chips to slot it there.
+- Drag chips to reorder. Drag one off the strip to remove it — that does not change its
+  stage.
+- Ranked cards show their number on the board, but the board's own order is untouched.
+- Holds up to 8. Most tasks have no rank at all, and an empty stack is a fine state.
+
+Order is entirely manual: nothing about activity, liveness or stage ever reorders it. The
+one automatic change is removal — reaching `done`, being archived or trashed drops a task
+and closes the gap, so the stack only ever holds live work. Ranks live in `BRIEF.md`
+frontmatter, so they survive deleting the database.
 
 ### The brief
 
@@ -200,7 +227,7 @@ sensitive, that directory deserves the same care as the repos themselves.
 
 ```sh
 npm install
-npm test                      # 142 vitest tests
+npm test                      # 166 vitest tests
 sh hooks/test/hook.test.sh    # hook contract tests (shell)
 npm start                     # run the server in the foreground
 cd dashboard && npm run dev   # dashboard with HMR against a running server

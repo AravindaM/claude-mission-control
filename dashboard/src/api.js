@@ -23,3 +23,6 @@ export const bindSession = (uuid, payload) => req('POST', `/api/sessions/${uuid}
 // rewrites Status, which is the cheap path.
 export const refreshBrief = (id, { about = false } = {}) =>
   req('POST', `/api/tasks/${id}/refresh-brief`, { about });
+// The whole stack, restated: promote, demote, remove and reorder are one call.
+// `order: []` clears it.
+export const setPriority = (order) => req('PUT', '/api/priority', { order });

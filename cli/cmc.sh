@@ -34,10 +34,15 @@ cmc() {
       local state
       state=$(curl -s --max-time 2 "$api/api/state" 2>/dev/null)
       if [ -n "$state" ]; then
+        # Ranked tasks first, in rank order, then everything else by recency.
+        # The dashboard is not the only place state gets checked, so the stack
+        # has to answer "what next" here too.
         printf '%s\n' "$state" | jq -r '
-          (["TASK","STATUS","JIRA","LIVE","LAST ACTIVITY"] | @tsv),
-          (.now as $now | .tasks[] | select(.archived == 0) |
-            [ .slug, .status, (.jira_key // "-"), (.live_sessions | tostring),
+          (["PRI","TASK","STATUS","JIRA","LIVE","LAST ACTIVITY"] | @tsv),
+          (.now as $now | [.tasks[] | select(.archived == 0)]
+            | sort_by(.priority // 9999, -(.last_activity_at // 0)) | .[] |
+            [ (.priority // "-" | tostring), .slug, .status, (.jira_key // "-"),
+              (.live_sessions | tostring),
               (if .last_activity_at then ((($now - .last_activity_at) / 60000 | floor | tostring) + "m ago") else "-" end)
             ] | @tsv)' | column -t -s "$(printf '\t')"
       else
