@@ -332,6 +332,13 @@ inherits it.
 ## 14. Out of scope (deliberate)
 
 - Discovering PRs automatically from GitHub, or any notion of "all my open PRs"
+- **Anything on the GitHub side reacting to a task changing stage.** Considered and
+  rejected 2026-09-11: auto-adding a PR when its task reaches `review`/`testing` was
+  possible — `harvestLinks` already extracts PR urls, and `gh pr list --head <branch>`
+  would find ones nobody pasted. It is still wrong. A PR's state depends on the PR, not
+  on where you filed the work locally, and coupling them would put a second authority
+  next to `gh` — the drift this design exists to remove. It would also grow the list on
+  its own, against the reason it is capped and curated.
 - Webhooks, polling faster than hourly, or any push mechanism
 - Diffs, comments, approvals, or merging from the dashboard
 - Editing cached fields by hand
