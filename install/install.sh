@@ -18,18 +18,35 @@ for tool in node claude jq curl sqlite3; do
 done
 NODE=$(command -v node)
 CLAUDE=$(command -v claude)
+# gh is optional: without it the PR watchlist still tracks urls you paste, it
+# just cannot fill in title or status. Missing gh must not block an install.
+GH=$(command -v gh || true)
 # launchd gets a bare PATH; everything below must be absolute.
 echo "node:   $NODE"
 echo "claude: $CLAUDE"
+echo "gh:     ${GH:-not found — PR status lookups disabled, everything else works}"
 
 echo "== data dir + config =="
-mkdir -p "$DATA/_spool" "$DATA/.index" "$DATA/_unbound" "$DATA/.bin"
-cat > "$DATA/.index/config.json" <<EOF
-{
-  "claudeBin": "$CLAUDE",
-  "port": $PORT
-}
-EOF
+mkdir -p "$DATA/_spool" "$DATA/.index" "$DATA/_unbound" "$DATA/_prs" "$DATA/.bin"
+# MERGE, never overwrite. This script advertises itself as idempotent, and a
+# plain `cat >` silently discarded every setting the user had added — jiraBase,
+# staleMinutes, prRefreshHours — on any re-run, including the re-run you do to
+# pick up a new version.
+CONFIG="$DATA/.index/config.json" \
+CLAUDE_BIN="$CLAUDE" GH_BIN="$GH" MC_PORT_ARG="$PORT" \
+"$NODE" -e '
+  const fs = require("fs");
+  const file = process.env.CONFIG;
+  let existing = {};
+  try { existing = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  // Resolved paths and port are owned by the installer and always refreshed;
+  // anything else the user set is preserved.
+  const next = { ...existing, claudeBin: process.env.CLAUDE_BIN, port: Number(process.env.MC_PORT_ARG) };
+  if (process.env.GH_BIN) next.ghBin = process.env.GH_BIN;
+  fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+  const kept = Object.keys(existing).filter((k) => !["claudeBin", "port", "ghBin"].includes(k));
+  if (kept.length) console.log("kept existing settings: " + kept.join(", "));
+'
 cp -f "$REPO/hooks/mc-hook.sh" "$DATA/.bin/mc-hook.sh"
 chmod +x "$DATA/.bin/mc-hook.sh"
 mkdir -p "$HOME/.local/bin"

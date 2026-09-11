@@ -44,6 +44,9 @@ drop you in the right repo, and the `SessionStart` hook feeds the brief in autom
   portable; on Linux you'd run the server yourself and register the hooks by hand.
 - **Node 20+**, **Claude Code** (`claude` on your PATH and logged in), plus `jq`,
   `curl` and `sqlite3` (all present on macOS except `jq`: `brew install jq`).
+- **`gh` is optional.** Without it the GitHub tab still tracks any PR url you paste,
+  it just cannot fill in the title, author or status. Install it later and re-run
+  `sh install/install.sh` to pick it up — the installer preserves your settings.
 
 ---
 
