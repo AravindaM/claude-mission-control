@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status_before_archive TEXT,
   jira_key TEXT,
   repo_path TEXT,
+  priority INTEGER,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -77,6 +78,10 @@ function migrate(db) {
     'ALTER TABLE sessions ADD COLUMN briefed_prompt_count INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE sessions ADD COLUMN turn_count INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE sessions ADD COLUMN briefed_turn_index INTEGER NOT NULL DEFAULT 0',
+    // Manual priority stack. Nullable on purpose: NULL is "unranked", which is
+    // the state of almost every task. Among eligible tasks the non-null values
+    // are exactly 1..n — see setPriorities.
+    'ALTER TABLE tasks ADD COLUMN priority INTEGER',
   ]) {
     try {
       db.exec(ddl);

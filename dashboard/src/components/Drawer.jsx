@@ -22,6 +22,56 @@ function Field({ label, value, onSave }) {
   );
 }
 
+/**
+ * The drawer's own title, edited in place.
+ *
+ * Renders as an h2 until clicked, then swaps to an input at the same size and
+ * position so the text does not move under the cursor. Enter or blur commits,
+ * Escape abandons. An empty title is refused rather than saved: `title` is NOT
+ * NULL in the schema, and a task with no name is unfindable on the board.
+ */
+function EditableTitle({ task }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.title);
+
+  // A brief regeneration or another tab can change the title underneath us;
+  // only adopt that while not editing, or it would overwrite what is typed.
+  useEffect(() => { if (!editing) setDraft(task.title); }, [task.title, editing]);
+
+  function commit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (!next || next === task.title) { setDraft(task.title); return; }
+    patchTask(task.id, { title: next });
+  }
+
+  if (!editing) {
+    return (
+      <h2
+        className="cursor-text rounded text-[22px] font-semibold leading-tight hover:bg-raised/60"
+        title="click to rename"
+        onClick={() => setEditing(true)}
+      >
+        {task.title}
+      </h2>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      aria-label="task title"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+        else if (e.key === 'Escape') { setDraft(task.title); setEditing(false); }
+      }}
+      className="w-full rounded border border-accent bg-raised px-1 text-[22px] font-semibold leading-tight outline-none"
+    />
+  );
+}
+
 function SectionLabel({ children, action }) {
   return (
     <div className="mb-1 flex items-baseline gap-2">
@@ -207,7 +257,16 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
   }, [task.id, task.updated_at, allEvents]);
 
   useEffect(() => {
-    const esc = (e) => e.key === 'Escape' && onClose();
+    // Escape inside a field cancels that edit, not the whole drawer. Without
+    // this guard, abandoning a rename also threw away the panel you were
+    // working in — the listener is on `document`, so the input cannot stop it
+    // by itself.
+    const esc = (e) => {
+      if (e.key !== 'Escape') return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+      onClose();
+    };
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [onClose]);
@@ -239,7 +298,7 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
           {task.title.toLowerCase() !== task.slug.toLowerCase() && (
             <div className="font-mono text-[16px] text-muted">{task.slug}</div>
           )}
-          <h2 className="text-[22px] font-semibold leading-tight">{task.title}</h2>
+          <EditableTitle task={task} />
         </div>
         <button onClick={onClose} aria-label="close"
           className="ml-auto rounded border border-line px-2 py-0.5 font-mono text-[16px] text-muted hover:border-muted">
@@ -371,10 +430,14 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
         </section>
 
         <section className="border-t border-line pt-3">
+          {/* TITLE lived here too. Removed: the header is now click-to-edit,
+              and two inputs writing the same field is two places for it to
+              drift. */}
           <SectionLabel>EDIT</SectionLabel>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="TITLE" value={task.title} onSave={(v) => patchTask(task.id, { title: v })} />
             <Field label="JIRA" value={task.jira_key} onSave={(v) => patchTask(task.id, { jira_key: v || null })} />
+            {/* REPO keeps the full row: an absolute path does not fit in half
+                a drawer, and truncating the middle of a path is unreadable. */}
             <div className="col-span-2">
               <Field label="REPO" value={task.repo_path} onSave={(v) => patchTask(task.id, { repo_path: v || null })} />
             </div>

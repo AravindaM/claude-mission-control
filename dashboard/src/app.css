@@ -23,6 +23,9 @@
   --stage-build: #fbbf24;
   --stage-done: #4ade80;
   /* per-stage hues (tile tint, strip, left edge) */
+  /* Backlog reads cold on purpose: it is the one stage where nothing is
+     happening, so it takes a desaturated slate against the saturated rest. */
+  --st-backlog: #64748b;
   --st-explore: #67e8f9;
   --st-plan: #a78bfa;
   --st-development: #fbbf24;
@@ -50,6 +53,7 @@
     --stage-shape: #6d28d9;
     --stage-build: #b45309;
     --stage-done: #15803d;
+    --st-backlog: #475569;
     --st-explore: #0e7490;
     --st-plan: #6d28d9;
     --st-development: #b45309;
@@ -73,6 +77,7 @@
   --stage-shape: #6d28d9;
   --stage-build: #b45309;
   --stage-done: #15803d;
+  --st-backlog: #475569;
   --st-explore: #0e7490;
   --st-plan: #6d28d9;
   --st-development: #b45309;
