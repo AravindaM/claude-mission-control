@@ -47,7 +47,9 @@ Not a task. PRs do not get briefs, transcripts, stages, or archival.
 ```sql
 CREATE TABLE prs (
   id INTEGER PRIMARY KEY,
-  url TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL UNIQUE,             -- canonical form, see below
+  host TEXT,
+  owner TEXT,
   repo TEXT,
   number INTEGER,
   position INTEGER NOT NULL,
@@ -55,7 +57,8 @@ CREATE TABLE prs (
   -- everything below is a gh cache, never user-edited
   title TEXT,
   author_login TEXT,
-  author_is_me INTEGER NOT NULL DEFAULT 0,
+  author_is_me INTEGER,                 -- NULL = not yet known, see §7
+  gh_failures INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'open',   -- open | merged | closed
   review_decision TEXT,
   is_draft INTEGER NOT NULL DEFAULT 0,
@@ -67,12 +70,21 @@ CREATE TABLE prs (
 );
 ```
 
-`url` is identity and carries the UNIQUE constraint. Adding a URL already tracked refreshes
-that record rather than inserting a duplicate — the natural thing to do when you cannot
-remember whether you already added it.
+`url` is the **canonical** URL and carries the UNIQUE constraint. It is not what you
+pasted: the input is normalised to `https://<host>/<owner>/<repo>/pull/<number>` first,
+discarding any `/files`, `/commits`, `#discussion_r…` suffix, trailing slash, query string
+or `www.` prefix.
 
-`repo` and `number` are parsed from the URL at insert, **before** `gh` is consulted, so a
-card always has something to render even when the lookup fails.
+Without that normalisation the UNIQUE constraint is decorative. `…/pull/212` and
+`…/pull/212/files` are different strings and would both insert, so the promise that
+re-adding a tracked PR refreshes rather than duplicates would be false for exactly the
+URLs people actually copy — a browser address bar is usually sitting on `/files`.
+
+A URL that does not match the canonical shape is rejected at the API with `400` rather
+than stored. There is nothing useful to track about a string that is not a PR.
+
+`repo`, `owner`, `host` and `number` fall out of that parse, **before** `gh` is consulted,
+so a card always has something to render even when the lookup fails.
 
 `task_id` is `ON DELETE SET NULL`, not `CASCADE`. Deleting a task must not delete the
 record of a PR that shipped it.
@@ -135,11 +147,30 @@ The viewer's login is fetched once per process and cached; `author_is_me` is
 `author.login === viewerLogin`. Nothing in this app previously knew who you are on GitHub,
 and asking `gh` beats a config field the user has to keep correct.
 
+**`author_is_me` is nullable, and NULL is not false.** If `gh api user` fails, a boolean
+defaulting to 0 would put every PR — including your own — in TO REVIEW, and the board
+would look plausible while being wrong. That is worse than an error, because nothing
+prompts you to investigate. A PR whose authorship is unknown renders in an UNSORTED strip
+above the columns with the lookup error, and moves into a column once a refresh resolves
+it.
+
 **Failure is non-fatal and never blocks the write.** `gh` missing, unauthenticated, rate
 limited, offline, or the repo private: the record is still created from the URL alone,
 `gh_error` holds the reason, and the card renders `gh lookup failed — ↻` with whatever the
 URL gave us. A tracker that refuses to accept a PR because a subprocess failed is useless
 in precisely the situation where you are least able to check GitHub yourself.
+
+`gh_error` is cleared on the next success, and `gh_failures` is incremented on failure and
+reset on success.
+
+**Repeated failure backs off.** Some failures are permanent: the PR was deleted, the repo
+was made private, your access was revoked. Without a limit those retry hourly forever,
+spawning a subprocess to fail the same way indefinitely. After `gh_failures` reaches 5 the
+sweep skips the record entirely; the card says so, and a manual `↻` still tries and resets
+the counter on success. Give-up is the sweep's, never the user's.
+
+Every spawn has a timeout (10s). `gh` can hang on a network black hole, and a hung child
+in a serial queue stalls every later refresh behind it.
 
 ## 8. Refresh
 
@@ -156,7 +187,18 @@ by the count of PRs you are actually waiting on, not by everything you have ever
 Serial, never parallel: N concurrent `gh` subprocesses is rude to the machine and to the
 API, and this is a background task with no deadline.
 
-A per-card `↻` runs the same lookup on demand for "check it now".
+**The refresh pass needs its own re-entrancy guard.** `index.js:41` is
+`setInterval(sweep, 5min)` with nothing preventing overlap, which is safe today only
+because `reconcile()` is synchronous — it cannot still be running when the timer next
+fires. A pass that spawns subprocesses can be, and a second pass starting mid-flight would
+double every refresh and interleave writes to the same rows.
+
+The guard is the `draining` promise from `briefer.js:370`, including its `.finally` reset
+— that file records a live incident where resetting the flag inside the loop body instead
+disabled briefing for the process lifetime. Reusing the shape avoids re-deriving the bug.
+
+A per-card `↻` runs the same lookup on demand for "check it now", and works even when
+`prRefreshHours` is `0`. Disabling the sweep disables the schedule, not the feature.
 
 ## 9. Server & API
 
@@ -180,6 +222,15 @@ set of positions in play is unchanged, so global uniqueness is preserved and no 
 outside the request is touched. It rejects `400` on an unknown or duplicate id.
 
 Watchlist rows ride along in `GET /api/state` so the dashboard keeps a single fetch.
+
+Every mutation calls `broadcast()`, like every other write in `api.js`. Without it the
+hourly sweep would update the database and leave an open dashboard showing yesterday's
+statuses until someone reloaded — the sweep is the one writer the user never triggers, so
+it is the one that most needs to push.
+
+A PR whose linked task is archived or trashed stays tracked and still shows the link,
+rendered muted. Archiving a task is a statement about the task, not about a PR that
+shipped it.
 
 ## 10. Durability
 
@@ -211,7 +262,21 @@ Delete the database and the watchlist survives; the next sweep refills the statu
 the README's stated contract, and a PR list that lived only in SQLite would break it.
 
 `task` is stored as a slug because task ids are an index artefact that `reindex` may
-reassign, while slugs are stable and greppable.
+reassign, while slugs are stable and greppable. A slug naming a task that no longer exists
+resolves to `NULL` and the PR stays tracked — an unresolvable link is not a reason to lose
+the record.
+
+**`DELETE` must remove the file, not just the row.** The files are the source of truth, so
+a row deleted while its file survives is resurrected by the next `reindex` — the PR would
+reappear after a restart with no way to get rid of it. The file is removed first; a failed
+row delete then leaves an orphan row that the next reindex drops anyway, which is the
+recoverable direction.
+
+The directory is `_prs`, and the underscore is load-bearing: `reindex` enumerates task
+directories with `!e.name.startsWith('_')` (`taskstore.js:26,207`), so an underscore-free
+name like `prs/` would be parsed as a task, fail validation for want of a `slug`, and be
+silently skipped — the same convention `_spool` and `_unbound` already rely on. The PR
+pass reads `_prs` explicitly rather than inheriting that enumeration.
 
 An empty body is intentional headroom: per-PR review notes can be added later without a
 migration, in the same place a brief lives for a task.
@@ -246,14 +311,19 @@ work in every manual test.
 
 | Concern | Test |
 |---|---|
-| URL parsing | github.com, enterprise host, trailing slash, `/files` and `#discussion` suffixes |
-| Identity | adding a tracked URL updates rather than inserts |
+| URL canonicalisation | `/files`, `/commits`, `#discussion_r…`, trailing slash, query string and `www.` all normalise to one form |
+| Identity | `…/pull/212` and `…/pull/212/files` resolve to the same record, not two |
+| Rejection | a URL that is not a PR is `400`, not a stored row |
 | Degradation | `gh` failure still creates a record, sets `gh_error`, leaves `repo`/`number` populated |
+| Unknown authorship | `author_is_me` stays NULL when the viewer login is unavailable, and the PR is not filed as someone else's |
+| Backoff | after 5 consecutive failures the sweep skips the record; a manual `↻` still runs and resets the count |
+| Re-entrancy | a second sweep starting while one is in flight is a no-op, and the flag resets after an empty pass |
 | Cache is not writable | `PATCH` with `title` or `state` is ignored or rejected |
 | Ordering | reorder permutes one column and leaves the others' positions untouched |
 | Terminal state | a merged PR is never re-fetched by the sweep; a closed one is |
 | Durability | `url` + `task` + `position` round-trip through `reindex` after deleting the DB |
-| Referential integrity | deleting a task nulls `task_id`, leaving the PR tracked |
+| Deletion is durable | `DELETE` removes the file, so `reindex` does not resurrect the PR |
+| Referential integrity | deleting a task nulls `task_id`, leaving the PR tracked; an unknown slug resolves to NULL |
 
 `gh` is stubbed with the injected-spawn pattern from `briefer.test.js`, so no test shells
 out. The spawn seam is the reason that file's tests are fast and hermetic, and this
