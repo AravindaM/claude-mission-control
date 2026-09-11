@@ -23,3 +23,11 @@ export const bindSession = (uuid, payload) => req('POST', `/api/sessions/${uuid}
 // rewrites Status, which is the cheap path.
 export const refreshBrief = (id, { about = false } = {}) =>
   req('POST', `/api/tasks/${id}/refresh-brief`, { about });
+
+// PR watchlist. Only the url, the order and the task link are ours to write —
+// title, author and state are a gh cache the server refuses to let us edit.
+export const addPr = (url, taskId = null) => req('POST', '/api/prs', { url, taskId });
+export const setPrTask = (id, taskId) => req('PATCH', `/api/prs/${id}`, { taskId });
+export const setPrOrder = (order) => req('PUT', '/api/prs/order', { order });
+export const refreshPr = (id) => req('POST', `/api/prs/${id}/refresh`, {});
+export const deletePr = (id) => req('DELETE', `/api/prs/${id}`);

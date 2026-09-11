@@ -101,6 +101,8 @@ rm ~/.claude/skills/task ~/.local/bin/cmcctl
 | Pick a task back up | `cmc resume auth-rate-limit` — the last session, whole transcript |
 | Start clean on the same task | `cmc continue auth-rate-limit` — new session, brief only |
 | Read all briefs in the terminal | `cmc digest` |
+| Track a pull request | paste its url in the GitHub tab |
+| See what you trashed | the 🗑 toggle inside ARCHIVE |
 | Check the server | `cmcctl status` / `cmcctl logs` |
 
 `resume` and `continue` both take a substring, and offer you the matches when more than
@@ -118,6 +120,18 @@ Seven stages grouped into four columns — **PREP** (explore, plan), **BUILD**
 (development), **VERIFY** (review, testing), **SHIP** (deploy, done). Drag a card
 between columns, or click a segment on its stage strip. Drag to the bottom bar to
 archive or trash.
+
+### The GitHub tab
+
+A watchlist of pull requests, not a kanban. Paste a PR url to track it; `gh` fills in the
+title, author and status, and re-reads them hourly.
+
+Three columns — **MINE** awaiting review, **TO REVIEW** from others, and **MERGED** (the
+last 10, with abandoned PRs struck through). The column a PR sits in comes from GitHub, so
+cards drag only *within* a column, to set the order you want to work through them. Link a
+PR to a task from its card, or leave it unlinked — reviews you owe have no task of yours.
+
+`gh` failing is not fatal: the PR is still tracked from its url, and `↻` retries.
 
 ### The brief
 
@@ -155,6 +169,9 @@ without the server running. Every save keeps the previous version in
 | `jiraBase` | `""` | e.g. `https://your-org.atlassian.net/browse/` to make Jira chips link |
 | `unboundRetentionDays` | `30` | How long transcripts with no task are kept |
 | `trashRetentionDays` | `30` | How long trashed tasks are recoverable |
+| `ghBin` | resolved | Absolute path to `gh`, for the PR watchlist |
+| `prRefreshHours` | `1` | How often PR status is re-read. `0` disables the sweep |
+| `prMergedShown` | `10` | How many merged PRs the GitHub view shows |
 
 Environment overrides: `MC_PORT`, `MC_DATA_DIR`.
 
@@ -168,6 +185,7 @@ Environment overrides: `MC_PORT`, `MC_DATA_DIR`.
 │   ├── BRIEF.md            # frontmatter + the five sections
 │   ├── briefs/             # every previous version
 │   └── transcripts/        # session transcripts, copied on SessionEnd
+├── _prs/                   # PR watchlist: url, task link and order only
 ├── _unbound/               # transcripts from sessions with no task
 ├── _spool/events.jsonl     # append-only hook event log
 └── .index/mission-control.db   # SQLite index, rebuildable from the files
@@ -200,7 +218,7 @@ sensitive, that directory deserves the same care as the repos themselves.
 
 ```sh
 npm install
-npm test                      # 142 vitest tests
+npm test                      # 179 vitest tests
 sh hooks/test/hook.test.sh    # hook contract tests (shell)
 npm start                     # run the server in the foreground
 cd dashboard && npm run dev   # dashboard with HMR against a running server

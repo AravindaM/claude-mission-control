@@ -5,6 +5,7 @@ import Board from './components/Board.jsx';
 import Drawer from './components/Drawer.jsx';
 import ArchiveRail from './components/ArchiveRail.jsx';
 import Digest from './components/Digest.jsx';
+import GithubBoard from './components/GithubBoard.jsx';
 
 export default function App() {
   const { state, syncedAt, connected } = useStore();
@@ -36,12 +37,15 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           {view === 'board' && <Board state={state} onOpen={(t) => setOpenTaskId(t.id)} />}
+          {view === 'github' && <GithubBoard state={state} now={now} />}
           {view === 'digest' && <Digest jiraBase={state.jiraBase} onOpen={(t) => setOpenTaskId(t.id)} />}
+          {/* Trash is a toggle inside archive, not a view of its own. */}
           {view === 'archive' && (
-            <ArchiveRail tasks={state.tasks.filter((t) => t.archived)} now={now} mode="archive" onOpen={(t) => setOpenTaskId(t.id)} />
-          )}
-          {view === 'trash' && (
-            <ArchiveRail tasks={state.trash} now={now} mode="trash" onOpen={(t) => setOpenTaskId(t.id)} />
+            <ArchiveRail
+              archived={state.tasks.filter((t) => t.archived)}
+              trash={state.trash}
+              now={now}
+              onOpen={(t) => setOpenTaskId(t.id)} />
           )}
         </main>
         {openTask && (

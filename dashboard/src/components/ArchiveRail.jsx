@@ -2,10 +2,17 @@ import { useState } from 'react';
 import { patchTask, restoreTrash } from '../api.js';
 import { agoLabel } from '../meta.js';
 
-// Serves both the archive view and the trash view — same list anatomy,
-// different source array and restore action.
-export default function ArchiveRail({ tasks, now, mode, onOpen }) {
+/**
+ * Archive, with trash as a filter rather than a sibling tab.
+ *
+ * Both answer the same question — "what did I put away" — and trash is the
+ * rarer half, so a permanent top-level slot for it cost more than it returned.
+ * The toggle keeps it one click from where you already are.
+ */
+export default function ArchiveRail({ archived, trash, now, onOpen }) {
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState('archive');
+  const tasks = mode === 'trash' ? trash : archived;
   const filtered = tasks.filter((t) =>
     (t.slug + ' ' + t.title + ' ' + (t.jira_key ?? '')).toLowerCase().includes(query.toLowerCase()));
 
@@ -15,6 +22,18 @@ export default function ArchiveRail({ tasks, now, mode, onOpen }) {
         <h2 className="font-mono text-[18px] font-semibold tracking-[0.25em] text-muted">
           {mode === 'trash' ? 'TRASH' : 'ARCHIVE'} ({filtered.length})
         </h2>
+        <button
+          onClick={() => setMode(mode === 'trash' ? 'archive' : 'trash')}
+          aria-label={mode === 'trash' ? 'back to archive' : 'view trash'}
+          // The count rides on the control so a non-empty trash is visible
+          // without opening it — otherwise folding the tab away would hide
+          // that anything is in there at all.
+          className={`mc-tip rounded border px-2 py-0.5 font-mono text-[15px]
+            ${mode === 'trash' ? 'border-danger text-danger' : 'border-line text-muted hover:border-muted hover:text-ink'}`}
+          data-tip={mode === 'trash' ? 'back to archive' : 'view trash'}
+        >
+          {mode === 'trash' ? '← archive' : `🗑 trash${trash.length ? ` (${trash.length})` : ''}`}
+        </button>
         <input
           placeholder="filter…"
           value={query}
