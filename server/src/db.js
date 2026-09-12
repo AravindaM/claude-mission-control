@@ -41,6 +41,33 @@ CREATE TABLE IF NOT EXISTS events (
   detail TEXT,
   created_at INTEGER NOT NULL
 );
+-- Watchlist of pull requests. Everything below task_id is a cache of what gh
+-- last reported and is never edited by hand — the user owns which PRs are
+-- tracked, their order, and the task link. Nothing else.
+CREATE TABLE IF NOT EXISTS prs (
+  id INTEGER PRIMARY KEY,
+  url TEXT NOT NULL UNIQUE,          -- canonical form; see canonicalizePrUrl
+  host TEXT,
+  owner TEXT,
+  repo TEXT,
+  number INTEGER,
+  position INTEGER NOT NULL,
+  task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  title TEXT,
+  author_login TEXT,
+  -- Nullable on purpose. NOT NULL DEFAULT 0 would file YOUR pr under someone
+  -- else's whenever the viewer lookup fails, which looks plausible and is wrong.
+  author_is_me INTEGER,
+  state TEXT NOT NULL DEFAULT 'open',   -- open | merged | closed
+  review_decision TEXT,
+  is_draft INTEGER NOT NULL DEFAULT 0,
+  resolved_at INTEGER,               -- merged at, or first seen closed
+  gh_fetched_at INTEGER,
+  gh_error TEXT,
+  gh_failures INTEGER NOT NULL DEFAULT 0,
+  added_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT

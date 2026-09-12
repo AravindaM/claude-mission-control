@@ -18,18 +18,35 @@ for tool in node claude jq curl sqlite3; do
 done
 NODE=$(command -v node)
 CLAUDE=$(command -v claude)
+# gh is optional: without it the PR watchlist still tracks urls you paste, it
+# just cannot fill in title or status. Missing gh must not block an install.
+GH=$(command -v gh || true)
 # launchd gets a bare PATH; everything below must be absolute.
 echo "node:   $NODE"
 echo "claude: $CLAUDE"
+echo "gh:     ${GH:-not found — PR status lookups disabled, everything else works}"
 
 echo "== data dir + config =="
-mkdir -p "$DATA/_spool" "$DATA/.index" "$DATA/_unbound" "$DATA/.bin"
-cat > "$DATA/.index/config.json" <<EOF
-{
-  "claudeBin": "$CLAUDE",
-  "port": $PORT
-}
-EOF
+mkdir -p "$DATA/_spool" "$DATA/.index" "$DATA/_unbound" "$DATA/_prs" "$DATA/.bin"
+# MERGE, never overwrite. This script advertises itself as idempotent, and a
+# plain `cat >` silently discarded every setting the user had added — jiraBase,
+# staleMinutes, prRefreshHours — on any re-run, including the re-run you do to
+# pick up a new version.
+CONFIG="$DATA/.index/config.json" \
+CLAUDE_BIN="$CLAUDE" GH_BIN="$GH" MC_PORT_ARG="$PORT" \
+"$NODE" -e '
+  const fs = require("fs");
+  const file = process.env.CONFIG;
+  let existing = {};
+  try { existing = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  // Resolved paths and port are owned by the installer and always refreshed;
+  // anything else the user set is preserved.
+  const next = { ...existing, claudeBin: process.env.CLAUDE_BIN, port: Number(process.env.MC_PORT_ARG) };
+  if (process.env.GH_BIN) next.ghBin = process.env.GH_BIN;
+  fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+  const kept = Object.keys(existing).filter((k) => !["claudeBin", "port", "ghBin"].includes(k));
+  if (kept.length) console.log("kept existing settings: " + kept.join(", "));
+'
 cp -f "$REPO/hooks/mc-hook.sh" "$DATA/.bin/mc-hook.sh"
 chmod +x "$DATA/.bin/mc-hook.sh"
 mkdir -p "$HOME/.local/bin"
@@ -58,7 +75,11 @@ MERGED=$(jq --arg cmd "$HOOK_CMD" '
 echo "--- settings.json diff ---"
 printf '%s' "$MERGED" | diff "$SETTINGS" - || true
 printf 'Apply this change to %s? [y/N] ' "$SETTINGS"
-read -r ANSWER
+# `|| ANSWER=""` is load-bearing: this script runs under `set -e`, and read
+# returns non-zero at EOF. Piped or redirected stdin therefore ABORTED the
+# install right here — after writing config but before linking the skill or
+# registering the agent — leaving a half-done install that looked fine.
+read -r ANSWER || ANSWER=""
 case "$ANSWER" in
   y|Y)
     cp "$SETTINGS" "$SETTINGS.bak.$(date +%s)"
@@ -83,7 +104,21 @@ sed -e "s|__NODE__|$NODE|g" \
     -e "s|__PATHDIRS__|$(dirname "$NODE"):$(dirname "$CLAUDE"):/usr/bin:/bin|g" \
     "$REPO/install/mission-control.plist.tmpl" > "$PLIST"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# bootout is ASYNCHRONOUS: it returns before the service is gone, so a
+# bootstrap fired immediately after hits a label that still exists and fails
+# with "5: Input/output error". Under `set -e` that aborted the installer right
+# here — after the bootout — leaving the agent unloaded and the server down.
+# Re-running the installer could therefore take a working install offline.
+i=0
+while launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; do
+  i=$((i + 1)); [ "$i" -gt 20 ] && break
+  sleep 0.5
+done
+# Still tolerate a failure: if the label survived, kickstart restarts what is
+# already there, which is the same recovery cmcctl start uses.
+launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
+  || launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>/dev/null \
+  || true
 # bootstrap alone doesn't always fire RunAtLoad on a re-registered label
 launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null || true
 

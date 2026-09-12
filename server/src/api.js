@@ -7,6 +7,7 @@ import {
 } from './taskstore.js';
 import { ingestSpool, applySpoolEvent, writeBindings, attachSession, JIRA_KEY } from './spool.js';
 import { resolveBinding } from './binding.js';
+import { addPr, getPr, listPrs, setPrTask, setPrOrder, deletePr } from './prs.js';
 import { splitBrief, linkifyTickets } from './briefformat.js';
 import { slugify } from './paths.js';
 
@@ -16,7 +17,7 @@ const TWO_DAYS = 48 * 60 * 60 * 1000;
 // /task verbs. Reserved words, checked before a ref is resolved.
 const VERBS = new Set(['show', 'done', 'archive']);
 
-export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, staticRoot = null }) {
+export function buildApp({ ctx, config, briefer = null, prRefresher = null, heartbeatMs = 15_000, staticRoot = null }) {
   const app = Fastify({ logger: false });
   const sseClients = new Set();
 
@@ -224,6 +225,51 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     return { queued: true, sessions: readable.length, about };
   });
 
+  // ---- pr watchlist ----
+  // You own which PRs are tracked, their order, and the task link. Title,
+  // author and state are a cache of what gh last said and are deliberately not
+  // writable — a hand-edit would be silently overwritten by the next sweep.
+
+  app.post('/api/prs', async (req, reply) => {
+    try {
+      const pr = addPr(ctx, { url: req.body?.url, taskId: req.body?.taskId ?? null });
+      broadcast();
+      // The lookup runs after the write and never blocks it: a tracker that
+      // refuses a PR because a subprocess failed is useless exactly when you
+      // cannot reach GitHub yourself.
+      prRefresher?.refreshOne(pr.id).catch(() => {});
+      reply.code(201);
+      return pr;
+    } catch (err) {
+      return reply.code(400).send({ error: String(err.message ?? err) });
+    }
+  });
+
+  app.patch('/api/prs/:id', (req, reply) => {
+    const id = Number(req.params.id);
+    if (!getPr(ctx, id)) return reply.code(404).send({ error: 'not found' });
+    if (!Object.hasOwn(req.body ?? {}, 'taskId')) {
+      return reply.code(400).send({ error: 'only taskId is editable — the rest is a gh cache' });
+    }
+    const taskId = req.body.taskId == null ? null : Number(req.body.taskId);
+    if (taskId != null && !getTask(ctx, taskId)) {
+      return reply.code(400).send({ error: `unknown task ${taskId}` });
+    }
+    const pr = setPrTask(ctx, id, taskId);
+    broadcast();
+    return pr;
+  });
+
+  app.put('/api/prs/order', (req, reply) => {
+    try {
+      const order = setPrOrder(ctx, req.body?.order ?? []);
+      broadcast();
+      return { order };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err.message ?? err) });
+    }
+  });
+
   // The whole stack, restated. Promote, demote, remove and reorder are all the
   // same act — "here is the new order" — so they share one route. `order: []`
   // clears the stack, which is why there is no delete counterpart.
@@ -237,6 +283,22 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
     } catch (err) {
       return reply.code(400).send({ error: String(err.message ?? err) });
     }
+  });
+
+  app.post('/api/prs/:id/refresh', async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!getPr(ctx, id)) return reply.code(404).send({ error: 'not found' });
+    if (!prRefresher) return { refreshed: false, reason: 'gh unavailable' };
+    const pr = await prRefresher.refreshOne(id);
+    broadcast();
+    return pr;
+  });
+
+  app.delete('/api/prs/:id', (req, reply) => {
+    const id = Number(req.params.id);
+    if (!deletePr(ctx, id)) return reply.code(404).send({ error: 'not found' });
+    broadcast();
+    return { ok: true };
   });
 
   app.get('/api/tasks/:id/sessions', (req) => ctx.db.prepare(
@@ -461,6 +523,8 @@ export function buildApp({ ctx, config, briefer = null, heartbeatMs = 15_000, st
       trash: tasks.filter(t => t.deleted_at != null),
       unassigned, banners, now,
       jiraBase: config.jiraBase,
+      prs: listPrs(ctx),
+      prMergedShown: config.prMergedShown,
     };
   });
 

@@ -77,8 +77,12 @@ export default function Header({ state, syncedAt, connected, now, view, setView 
       <div className="flex items-center gap-4 px-4 py-2">
         <h1 className="font-mono text-[19px] font-semibold tracking-[0.3em] text-accent">MISSION CONTROL</h1>
 
+        {/* Trash is not a tab: it is a filter on ARCHIVE. Both are the same
+            question — "what did I put away" — and a top-level tab for the
+            rarer half of it spent a permanent slot on something opened
+            monthly. */}
         <nav className="flex gap-1 font-mono text-[16px]">
-          {['board', 'digest', 'archive', 'trash'].map((v) => (
+          {['board', 'github', 'digest', 'archive'].map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`rounded px-2 py-0.5 uppercase tracking-widest ${view === v ? 'bg-raised text-ink' : 'text-muted hover:text-ink'}`}>
               {v}

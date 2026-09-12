@@ -19,6 +19,14 @@ const DEFAULTS = {
   // e.g. "https://your-org.atlassian.net/browse/". Empty means the key renders
   // as plain text rather than a link to nowhere.
   jiraBase: '',
+  // Resolved to an absolute path by the installer, for the same reason claudeBin
+  // is: the launchd agent does not inherit a login shell's PATH, so a bare `gh`
+  // would work in every manual test and fail only under launchd.
+  ghBin: 'gh',
+  // Staleness threshold for the PR watchlist sweep. 0 disables the schedule; the
+  // per-card refresh still works.
+  prRefreshHours: 1,
+  prMergedShown: 10,
 };
 
 export function loadConfig(env = process.env) {

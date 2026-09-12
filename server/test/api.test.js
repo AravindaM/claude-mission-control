@@ -403,6 +403,80 @@ describe('api', () => {
     await reader.cancel();
   });
 
+  describe('pr watchlist', () => {
+    const url = (n) => `https://github.com/example/api/pull/${n}`;
+    const put = (u, payload) => app.inject({
+      method: 'PUT', url: u, payload, headers: { origin: 'http://127.0.0.1:47613' },
+    });
+
+    it('adds a pr and exposes it on /api/state', async () => {
+      const res = await post('/api/prs', { url: url(212) + '/files' });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({ url: url(212), repo: 'api', number: 212 });
+
+      const state = (await app.inject('/api/state')).json();
+      expect(state.prs.map((p) => p.url)).toEqual([url(212)]);
+    });
+
+    it('rejects a url that is not a pull request', async () => {
+      const res = await post('/api/prs', { url: 'https://github.com/example/api/issues/7' });
+      expect(res.statusCode).toBe(400);
+      expect((await app.inject('/api/state')).json().prs).toEqual([]);
+    });
+
+    it('re-adding the same pr in another url form does not duplicate it', async () => {
+      await post('/api/prs', { url: url(212) });
+      await post('/api/prs', { url: url(212) + '#discussion_r1' });
+      expect((await app.inject('/api/state')).json().prs.length).toBe(1);
+    });
+
+    // Title/state/author are a gh cache — a hand-edit would be silently
+    // overwritten by the next sweep, so the API refuses rather than pretending.
+    it('only taskId is editable', async () => {
+      const pr = (await post('/api/prs', { url: url(212) })).json();
+      const bad = await app.inject({
+        method: 'PATCH', url: `/api/prs/${pr.id}`, payload: { title: 'nope' },
+        headers: { origin: 'http://127.0.0.1:47613' },
+      });
+      expect(bad.statusCode).toBe(400);
+
+      const { id: taskId } = (await post('/api/tasks', { title: 'Auth' })).json();
+      const ok = await app.inject({
+        method: 'PATCH', url: `/api/prs/${pr.id}`, payload: { taskId },
+        headers: { origin: 'http://127.0.0.1:47613' },
+      });
+      expect(ok.json().task_id).toBe(taskId);
+    });
+
+    it('reorders by permuting held positions, and rejects bad input', async () => {
+      const a = (await post('/api/prs', { url: url(1) })).json();
+      const b = (await post('/api/prs', { url: url(2) })).json();
+      expect((await put('/api/prs/order', { order: [b.id, a.id] })).statusCode).toBe(200);
+
+      const prs = (await app.inject('/api/state')).json().prs;
+      expect(prs.map((p) => p.number)).toEqual([2, 1]);
+
+      expect((await put('/api/prs/order', { order: [a.id, 9999] })).statusCode).toBe(400);
+      expect((await put('/api/prs/order', { order: [a.id, a.id] })).statusCode).toBe(400);
+    });
+
+    it('deleting a pr stops tracking it', async () => {
+      const pr = (await post('/api/prs', { url: url(212) })).json();
+      const res = await app.inject({
+        method: 'DELETE', url: `/api/prs/${pr.id}`, headers: { origin: 'http://127.0.0.1:47613' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((await app.inject('/api/state')).json().prs).toEqual([]);
+    });
+
+    it('404s on an unknown pr rather than throwing', async () => {
+      for (const res of [
+        await app.inject({ method: 'DELETE', url: '/api/prs/9999', headers: { origin: 'http://127.0.0.1:47613' } }),
+        await app.inject({ method: 'PATCH', url: '/api/prs/9999', payload: { taskId: null }, headers: { origin: 'http://127.0.0.1:47613' } }),
+      ]) expect(res.statusCode).toBe(404);
+    });
+  });
+
   // Regression: the dashboard served a blank page after every rebuild. With
   // `wildcard: false` @fastify/static globs the directory once at registration,
   // so a file written later 404s into the SPA fallback and the browser is told
