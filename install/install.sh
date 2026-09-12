@@ -75,7 +75,11 @@ MERGED=$(jq --arg cmd "$HOOK_CMD" '
 echo "--- settings.json diff ---"
 printf '%s' "$MERGED" | diff "$SETTINGS" - || true
 printf 'Apply this change to %s? [y/N] ' "$SETTINGS"
-read -r ANSWER
+# `|| ANSWER=""` is load-bearing: this script runs under `set -e`, and read
+# returns non-zero at EOF. Piped or redirected stdin therefore ABORTED the
+# install right here — after writing config but before linking the skill or
+# registering the agent — leaving a half-done install that looked fine.
+read -r ANSWER || ANSWER=""
 case "$ANSWER" in
   y|Y)
     cp "$SETTINGS" "$SETTINGS.bak.$(date +%s)"
@@ -100,7 +104,21 @@ sed -e "s|__NODE__|$NODE|g" \
     -e "s|__PATHDIRS__|$(dirname "$NODE"):$(dirname "$CLAUDE"):/usr/bin:/bin|g" \
     "$REPO/install/mission-control.plist.tmpl" > "$PLIST"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# bootout is ASYNCHRONOUS: it returns before the service is gone, so a
+# bootstrap fired immediately after hits a label that still exists and fails
+# with "5: Input/output error". Under `set -e` that aborted the installer right
+# here — after the bootout — leaving the agent unloaded and the server down.
+# Re-running the installer could therefore take a working install offline.
+i=0
+while launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; do
+  i=$((i + 1)); [ "$i" -gt 20 ] && break
+  sleep 0.5
+done
+# Still tolerate a failure: if the label survived, kickstart restarts what is
+# already there, which is the same recovery cmcctl start uses.
+launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
+  || launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>/dev/null \
+  || true
 # bootstrap alone doesn't always fire RunAtLoad on a re-registered label
 launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null || true
 
