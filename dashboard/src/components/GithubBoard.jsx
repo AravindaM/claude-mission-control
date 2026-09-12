@@ -94,6 +94,9 @@ function PrCard({ pr, tasks, now, index }) {
           {pr.repo}#{pr.number}
         </a>
         {closed && <span className="shrink-0 font-mono text-[12px] text-muted">closed</span>}
+        {/* Both card actions live together in the top-right: they are the two
+            things you do TO a card, as opposed to the task picker below, which
+            is something you set ON it. */}
         <button
           data-no-drag
           className="mc-tip shrink-0 rounded border border-line px-1.5 font-mono text-[13px] text-muted hover:border-accent hover:text-accent disabled:opacity-40"
@@ -106,6 +109,14 @@ function PrCard({ pr, tasks, now, index }) {
           }}
         >
           {busy ? '…' : '↻'}
+        </button>
+        <button
+          data-no-drag
+          className="mc-tip shrink-0 rounded border border-line px-1.5 font-mono text-[13px] text-muted hover:border-danger hover:text-danger"
+          data-tip="stop tracking this PR"
+          onClick={() => deletePr(pr.id).catch(() => {})}
+        >
+          ×
         </button>
       </div>
 
@@ -139,13 +150,6 @@ function PrCard({ pr, tasks, now, index }) {
           ))}
           {task?.archived && <option value={task.id}>{task.slug} (archived)</option>}
         </select>
-        <button
-          className="shrink-0 rounded border border-line px-1.5 font-mono text-[13px] text-muted hover:border-danger hover:text-danger"
-          title="stop tracking this PR"
-          onClick={() => deletePr(pr.id).catch(() => {})}
-        >
-          ×
-        </button>
       </div>
     </div>
   );

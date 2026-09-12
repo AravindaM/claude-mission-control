@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { renderBrief, renderInline } from '../markdown.js';
-import { fetchBrief, fetchSessions, fetchEvents, patchTask, trashTask, refreshBrief } from '../api.js';
+import { fetchBrief, fetchSessions, fetchEvents, patchTask, trashTask, refreshBrief, addPr } from '../api.js';
 import { agoLabel, stageColor } from '../meta.js';
 import StageStrip from './StageStrip.jsx';
 
@@ -163,6 +163,51 @@ function Rows({ fields }) {
   );
 }
 
+const PR_URL = /https?:\/\/[^\s<>"'`)\]]+\/pull\/\d+/;
+
+/**
+ * Links, with a `+` on the ones that are pull requests.
+ *
+ * Per link rather than per section: the GitHub tab is a short curated list, so
+ * adding six PRs because a brief happens to mention six is exactly the flood it
+ * exists to avoid. You pick the one you care about.
+ *
+ * Adding here carries the task across, which is the only thing this does that
+ * pasting the url into the GitHub tab cannot.
+ */
+function LinkList({ items, taskId }) {
+  const [added, setAdded] = useState({});
+
+  return (
+    <ul className="space-y-1">
+      {items.map((item, i) => {
+        const url = item.match(PR_URL)?.[0];
+        const state = added[i];
+        return (
+          <li key={i} className="flex gap-2 text-[17px] leading-snug">
+            <span className="shrink-0 text-muted">·</span>
+            <span className="brief-row min-w-0 flex-1" dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
+            {url && (
+              <button
+                className="mc-tip shrink-0 self-start rounded border border-line px-1.5 font-mono text-[14px] text-muted hover:border-accent hover:text-accent disabled:opacity-40"
+                data-tip={state === 'done' ? 'tracked in the GitHub tab' : 'track this PR in the GitHub tab'}
+                disabled={!!state}
+                onClick={async () => {
+                  setAdded((a) => ({ ...a, [i]: 'busy' }));
+                  const ok = await addPr(url, taskId).then(() => true).catch(() => false);
+                  setAdded((a) => ({ ...a, [i]: ok ? 'done' : undefined }));
+                }}
+              >
+                {state === 'busy' ? '…' : state === 'done' ? '✓' : '+'}
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function RefreshButton({ task, about = false, tip, disabled = false, children }) {
   const [pending, setPending] = useState(false);
   const stamp = useRef(task.updated_at);
@@ -294,7 +339,7 @@ export default function Drawer({ task, now, jiraBase, onClose }) {
             <section>
               <SectionLabel>LINKS</SectionLabel>
               {s?.links.items.length
-                ? <BulletList items={s.links.items} />
+                ? <LinkList items={s.links.items} taskId={task.id} />
                 : <Empty>none recorded</Empty>}
             </section>
 
