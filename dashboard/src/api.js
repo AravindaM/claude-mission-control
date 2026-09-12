@@ -31,3 +31,6 @@ export const setPrTask = (id, taskId) => req('PATCH', `/api/prs/${id}`, { taskId
 export const setPrOrder = (order) => req('PUT', '/api/prs/order', { order });
 export const refreshPr = (id) => req('POST', `/api/prs/${id}/refresh`, {});
 export const deletePr = (id) => req('DELETE', `/api/prs/${id}`);
+// The whole stack, restated: promote, demote, remove and reorder are one call.
+// `order: []` clears it.
+export const setPriority = (order) => req('PUT', '/api/priority', { order });

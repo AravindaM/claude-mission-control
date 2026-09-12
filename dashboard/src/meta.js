@@ -1,4 +1,5 @@
 export const STAGES = [
+  { key: 'backlog', label: 'BKLG', col: 'backlog' },
   { key: 'explore', label: 'EXPL', col: 'prep' },
   { key: 'plan', label: 'PLAN', col: 'prep' },
   { key: 'development', label: 'DEV', col: 'build' },
@@ -8,7 +9,12 @@ export const STAGES = [
   { key: 'done', label: 'DONE', col: 'ship' },
 ];
 
+// All five columns share equally. A narrow BACKLOG was tried and abandoned:
+// at a fixed 150px it barely differed from an equal share anyway, and it made
+// backlog the one column you could not read. Columns instead get a readable
+// floor (see Board.jsx) and the board scrolls when it cannot honour it.
 export const COLUMNS = [
+  { key: 'backlog', label: 'BACKLOG', color: 'var(--st-backlog)' },
   { key: 'prep', label: 'PREP', color: 'var(--st-explore)' },
   { key: 'build', label: 'BUILD', color: 'var(--st-development)' },
   { key: 'verify', label: 'VERIFY', color: 'var(--st-testing)' },
@@ -16,6 +22,11 @@ export const COLUMNS = [
 ];
 
 export const columnOf = (status) => STAGES.find((s) => s.key === status)?.col ?? 'prep';
+export const stageLabel = (status) => STAGES.find((s) => s.key === status)?.label ?? status;
+// Mirrors PRIORITY_CAP in server/src/taskstore.js, which is authoritative and
+// rejects an over-cap order. Duplicated so the strip can disable its drop zone
+// before the round trip rather than after a 400.
+export const PRIORITY_CAP = 8;
 // Each stage has its own hue (CSS var, theme-aware) — used by the tile tint,
 // left edge, and lit strip segment.
 export const stageColor = (status) => `var(--st-${status})`;

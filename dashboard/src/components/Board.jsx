@@ -26,7 +26,12 @@ function Column({ column, tasks, now, jiraBase, onOpen }) {
 
   return (
     <section ref={ref} aria-label={`${column.label} column`}
-      className={`flex min-w-0 flex-1 flex-col rounded border bg-surface/40 ${over ? 'border-accent' : 'border-line'}`}>
+      // Equal share with a readable FLOOR. The original `flex-1 min-w-0` let
+      // columns compress without limit, so a fifth column plus the 640px
+      // drawer silently crushed every card title. Below the floor the board
+      // scrolls rather than shrinking anything further.
+      className={`flex min-w-[190px] flex-1 flex-col rounded border bg-surface/40
+        ${over ? 'border-accent' : 'border-line'}`}>
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <span className="size-[12px] rounded-[2px]" style={{ background: column.color }} />
         <h2 className="font-mono text-[16px] font-semibold tracking-[0.2em]">{column.label}</h2>
@@ -92,7 +97,9 @@ export default function Board({ state, onOpen }) {
   const active = state.tasks.filter((t) => !t.archived);
   return (
     <>
-      <div className="flex min-h-0 flex-1 gap-3 p-3">
+      {/* Scrolls horizontally once the columns hit their minimum width, which
+          is what keeps the drawer from being able to crush them. */}
+      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
         {COLUMNS.map((col) => (
           <Column key={col.key} column={col} now={state.now}
             jiraBase={state.jiraBase} onOpen={onOpen}

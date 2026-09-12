@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import { openDb } from '../src/db.js';
 import { createPaths } from '../src/paths.js';
 import { buildApp } from '../src/api.js';
+import { createTask, getTask, PRIORITY_CAP } from '../src/taskstore.js';
 
 const startEvent = (over = {}) => ({
   hook_event_name: 'SessionStart', session_id: 'u-1', source: 'startup',
@@ -473,6 +474,106 @@ describe('api', () => {
         await app.inject({ method: 'DELETE', url: '/api/prs/9999', headers: { origin: 'http://127.0.0.1:47613' } }),
         await app.inject({ method: 'PATCH', url: '/api/prs/9999', payload: { taskId: null }, headers: { origin: 'http://127.0.0.1:47613' } }),
       ]) expect(res.statusCode).toBe(404);
+    });
+  });
+
+  // Regression: the dashboard served a blank page after every rebuild. With
+  // `wildcard: false` @fastify/static globs the directory once at registration,
+  // so a file written later 404s into the SPA fallback and the browser is told
+  // a module script is text/html. Vite content-hashes filenames, so "later"
+  // meant every single rebuild.
+  describe('static assets', () => {
+    let staticApp, staticRoot;
+
+    beforeEach(async () => {
+      staticRoot = mkdtempSync(join(tmpdir(), 'mc-static-'));
+      writeFileSync(join(staticRoot, 'index.html'), '<!doctype html><div id="root"></div>');
+      staticApp = buildApp({ ctx, config, heartbeatMs: 40, staticRoot });
+      await staticApp.ready();
+    });
+
+    afterEach(async () => await staticApp.close());
+
+    it('serves an asset created after the server booted', async () => {
+      writeFileSync(join(staticRoot, 'built-later.js'), 'export const x = 1;\n');
+      const res = await staticApp.inject('/built-later.js');
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('javascript');
+      expect(res.body).toContain('export const x');
+    });
+
+    it('still falls back to the app shell for unknown non-API paths', async () => {
+      const res = await staticApp.inject('/some/spa/route');
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('id="root"');
+    });
+
+    it('still 404s unknown API paths as JSON rather than the shell', async () => {
+      const res = await staticApp.inject('/api/nope');
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe('not found');
+    });
+  });
+
+  describe('priority stack', () => {
+    const put = (url, payload) => app.inject({
+      method: 'PUT', url, payload, headers: { origin: 'http://127.0.0.1:47613' },
+    });
+    const mk = (title, status = 'development') =>
+      createTask(ctx, { title, status });
+
+    it('PUT /api/priority sets the order and reports it back', async () => {
+      const a = mk('Alpha'); const b = mk('Bravo');
+      const res = await put('/api/priority', { order: [b.id, a.id] });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().order).toEqual([b.id, a.id]);
+      expect(getTask(ctx, b.id).priority).toBe(1);
+      expect(getTask(ctx, a.id).priority).toBe(2);
+    });
+
+    it('state exposes priority so the strip and the cards agree', async () => {
+      const a = mk('Alpha');
+      await put('/api/priority', { order: [a.id] });
+      const task = (await app.inject('/api/state')).json().tasks.find((t) => t.id === a.id);
+      expect(task.priority).toBe(1);
+    });
+
+    it('rejects a bad order with 400 and changes nothing', async () => {
+      const a = mk('Alpha');
+      const done = mk('Finished', 'done');
+      await put('/api/priority', { order: [a.id] });
+      for (const order of [[a.id, a.id], [a.id, 9999], [done.id], 'nope']) {
+        const res = await put('/api/priority', { order });
+        expect(res.statusCode).toBe(400);
+      }
+      expect(getTask(ctx, a.id).priority).toBe(1); // the good order survived
+    });
+
+    it('rejects more than the cap', async () => {
+      const ids = Array.from({ length: PRIORITY_CAP + 1 }, (_, i) => mk(`T${i}`).id);
+      const res = await put('/api/priority', { order: ids });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/most/i);
+    });
+
+    // Reordering is scheduling, not activity: updated_at drives sortCards and
+    // the digest ORDER BY, so a bump here would reshuffle both surfaces.
+    it('reordering does not bump updated_at', async () => {
+      const a = mk('Alpha'); const b = mk('Bravo');
+      const before = getTask(ctx, a.id).updated_at;
+      await put('/api/priority', { order: [b.id, a.id] });
+      expect(getTask(ctx, a.id).updated_at).toBe(before);
+    });
+
+    it('archiving through the API drops the task from the stack', async () => {
+      const a = mk('Alpha'); const b = mk('Bravo');
+      await put('/api/priority', { order: [a.id, b.id] });
+      await app.inject({
+        method: 'PATCH', url: `/api/tasks/${a.id}`, payload: { archived: true },
+        headers: { origin: 'http://127.0.0.1:47613' },
+      });
+      expect(getTask(ctx, a.id).priority).toBe(null);
+      expect(getTask(ctx, b.id).priority).toBe(1); // gap closed
     });
   });
 });

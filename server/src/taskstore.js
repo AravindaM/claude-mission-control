@@ -3,8 +3,12 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { slugify } from './paths.js';
 
+// `backlog` is parked work: known, not started, not being thought about yet.
+// It is deliberately NOT the default for a new task — a task created by /task
+// exists because a session is working on it right now, which is `explore` at
+// the earliest. Backlog is somewhere you put things on purpose.
 export const STATUSES = [
-  'explore', 'plan', 'development', 'review', 'testing', 'deploy', 'done',
+  'backlog', 'explore', 'plan', 'development', 'review', 'testing', 'deploy', 'done',
 ];
 
 // Pre-2026-08-20 stage names → current lifecycle.
@@ -53,6 +57,7 @@ function rowToFrontmatter(row) {
     status_before_archive: row.status_before_archive ?? null,
     jira_key: row.jira_key ?? null,
     repo_path: row.repo_path ?? null,
+    priority: row.priority ?? null,
     deleted_at: row.deleted_at ?? null,
     created: row.created_at,
     updated: row.updated_at,
@@ -119,21 +124,97 @@ function assertStatus(status) {
   }
 }
 
+// The strip's value is being readable at a glance, and it wraps past eight at
+// 1440px. A cap that bites during ordinary use gets resented, so this is set
+// above the 3-5 the stack is expected to hold, not at it.
+export const PRIORITY_CAP = 8;
+
+/** Only live work can be ranked: a stack holding finished tasks stops being trusted. */
+function rankable(row) {
+  return !!row && !row.archived && row.deleted_at == null && row.status !== 'done';
+}
+
+/**
+ * Restate the whole stack. `order` is task ids, most important first; anything
+ * absent becomes unranked.
+ *
+ * Every write restates the entire order, which is what makes "the non-null
+ * priorities are exactly 1..n" true by construction rather than something a
+ * repair job maintains. Moving one chip rewrites at most eight rows — at this
+ * cap that cost buys away an entire class of inconsistent state.
+ *
+ * It deliberately does NOT go through updateTask: that bumps `updated_at`,
+ * which feeds sortCards and the digest's ORDER BY, so reordering the stack
+ * would reshuffle the board and the digest. Ranking is scheduling, not activity.
+ */
+export function setPriorities(ctx, order) {
+  if (!Array.isArray(order)) throw new Error('order must be an array of task ids');
+  if (order.length > PRIORITY_CAP) {
+    throw new Error(`the stack holds at most ${PRIORITY_CAP} tasks`);
+  }
+  const ids = order.map(Number);
+  if (new Set(ids).size !== ids.length) throw new Error('duplicate task id in order');
+  for (const id of ids) {
+    const row = getTask(ctx, id);
+    if (!row) throw new Error(`unknown task id ${id}`);
+    if (!rankable(row)) throw new Error(`task ${row.slug} is not eligible: done, archived or deleted`);
+  }
+
+  // Which rows actually change, so frontmatter is only rewritten where needed.
+  const before = new Map(ctx.db.prepare('SELECT id, priority FROM tasks WHERE priority IS NOT NULL')
+    .all().map((r) => [r.id, r.priority]));
+  const after = new Map(ids.map((id, i) => [id, i + 1]));
+
+  const write = ctx.db.prepare('UPDATE tasks SET priority = ? WHERE id = ?');
+  ctx.db.transaction(() => {
+    for (const id of before.keys()) if (!after.has(id)) write.run(null, id);
+    for (const [id, rank] of after) write.run(rank, id);
+  })();
+
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(id) !== after.get(id)) syncFrontmatter(ctx, id);
+  }
+  return ids;
+}
+
+/**
+ * Remove one task from the stack and close the gap.
+ *
+ * Callers invoke this INSIDE their own transaction: a crash between the status
+ * write and the rank write would otherwise leave a gap, violating the 1..n
+ * invariant with no repair path to notice it.
+ */
+function dropFromStack(ctx, id) {
+  const row = ctx.db.prepare('SELECT priority FROM tasks WHERE id = ?').get(id);
+  if (!row || row.priority == null) return [];
+  const survivors = ctx.db.prepare(`
+    SELECT id FROM tasks WHERE priority IS NOT NULL AND id != ? ORDER BY priority
+  `).all(id).map((r) => r.id);
+  const write = ctx.db.prepare('UPDATE tasks SET priority = ? WHERE id = ?');
+  write.run(null, id);
+  survivors.forEach((sid, i) => write.run(i + 1, sid));
+  return [id, ...survivors];
+}
+
 export function updateTask(ctx, id, patch, now = Date.now()) {
   if (patch.status !== undefined) assertStatus(patch.status);
   const allowed = ['title', 'status', 'jira_key', 'repo_path'];
   const fields = allowed.filter((f) => patch[f] !== undefined || patch[camel(f)] !== undefined);
   if (fields.length === 0) return getTask(ctx, id);
+  let dropped = [];
   const tx = ctx.db.transaction(() => {
     for (const f of fields) {
       let value = patch[f] !== undefined ? patch[f] : patch[camel(f)];
       if (f === 'repo_path') value = normalizeRepoPath(value);
       ctx.db.prepare(`UPDATE tasks SET ${f} = ?, updated_at = ? WHERE id = ?`).run(value, now, id);
       if (f === 'status') recordEvent(ctx, { taskId: id, type: 'status_changed', detail: { to: value } }, now);
+      // Finished work leaves the stack in the same transaction that finished it.
+      if (f === 'status' && value === 'done') dropped = dropFromStack(ctx, id);
     }
   });
   tx();
   syncFrontmatter(ctx, id);
+  for (const other of dropped) if (other !== id) syncFrontmatter(ctx, other);
   return getTask(ctx, id);
 }
 
@@ -143,10 +224,15 @@ function camel(snake) {
 
 export function archiveTask(ctx, id, now = Date.now()) {
   const row = getTask(ctx, id);
-  ctx.db.prepare('UPDATE tasks SET archived = 1, status_before_archive = ?, updated_at = ? WHERE id = ?')
-    .run(row.status, now, id);
-  recordEvent(ctx, { taskId: id, type: 'archived' }, now);
+  let dropped = [];
+  ctx.db.transaction(() => {
+    ctx.db.prepare('UPDATE tasks SET archived = 1, status_before_archive = ?, updated_at = ? WHERE id = ?')
+      .run(row.status, now, id);
+    recordEvent(ctx, { taskId: id, type: 'archived' }, now);
+    dropped = dropFromStack(ctx, id);
+  })();
   syncFrontmatter(ctx, id);
+  for (const other of dropped) if (other !== id) syncFrontmatter(ctx, other);
   return getTask(ctx, id);
 }
 
@@ -176,9 +262,14 @@ export function getBrief(ctx, taskId) {
 }
 
 export function softDelete(ctx, id, now = Date.now()) {
-  ctx.db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
-  recordEvent(ctx, { taskId: id, type: 'trashed' }, now);
+  let dropped = [];
+  ctx.db.transaction(() => {
+    ctx.db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
+    recordEvent(ctx, { taskId: id, type: 'trashed' }, now);
+    dropped = dropFromStack(ctx, id);
+  })();
   syncFrontmatter(ctx, id);
+  for (const other of dropped) if (other !== id) syncFrontmatter(ctx, other);
 }
 
 export function restoreTrash(ctx, id, now = Date.now()) {
@@ -206,12 +297,13 @@ export function reindex(ctx) {
   const entries = readdirSync(ctx.paths.dataDir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'));
   const insert = ctx.db.prepare(`
-    INSERT INTO tasks (slug, title, status, archived, status_before_archive, jira_key, repo_path, deleted_at, created_at, updated_at)
-    VALUES (@slug, @title, @status, @archived, @status_before_archive, @jira_key, @repo_path, @deleted_at, @created, @updated)
+    INSERT INTO tasks (slug, title, status, archived, status_before_archive, jira_key, repo_path, priority, deleted_at, created_at, updated_at)
+    VALUES (@slug, @title, @status, @archived, @status_before_archive, @jira_key, @repo_path, @priority, @deleted_at, @created, @updated)
     ON CONFLICT(slug) DO UPDATE SET
       title=excluded.title, status=excluded.status, archived=excluded.archived,
       status_before_archive=excluded.status_before_archive, jira_key=excluded.jira_key,
-      repo_path=excluded.repo_path, deleted_at=excluded.deleted_at,
+      repo_path=excluded.repo_path, priority=excluded.priority,
+      deleted_at=excluded.deleted_at,
       created_at=excluded.created_at, updated_at=excluded.updated_at
   `);
   let indexed = 0;
@@ -229,6 +321,7 @@ export function reindex(ctx) {
         status_before_archive: fm.status_before_archive ?? null,
         jira_key: fm.jira_key ?? null,
         repo_path: fm.repo_path ?? null,
+        priority: Number.isInteger(fm.priority) ? fm.priority : null,
         deleted_at: fm.deleted_at ?? null,
         created: fm.created,
         updated: fm.updated,

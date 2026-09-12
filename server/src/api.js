@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import {
   createTask, updateTask, archiveTask, unarchiveTask, softDelete, restoreTrash,
   getTask, getTaskBySlug, listTasks, saveBrief, getBrief, recordEvent,
+  setPriorities,
 } from './taskstore.js';
 import { ingestSpool, applySpoolEvent, writeBindings, attachSession, JIRA_KEY } from './spool.js';
 import { resolveBinding } from './binding.js';
@@ -21,7 +22,14 @@ export function buildApp({ ctx, config, briefer = null, prRefresher = null, hear
   const sseClients = new Set();
 
   if (staticRoot) {
-    app.register(import('@fastify/static'), { root: staticRoot, wildcard: false });
+    // `wildcard: true` resolves each request against the filesystem. With
+    // `wildcard: false` the plugin globs the directory ONCE at registration and
+    // registers a route per file, so anything built afterwards 404s and falls
+    // through to the SPA handler below — which answers text/html to a request
+    // for a module script, and the page renders blank. Vite content-hashes
+    // every filename, so that was every dashboard rebuild against a live
+    // server, and the only cure was a restart nothing told you to do.
+    app.register(import('@fastify/static'), { root: staticRoot, wildcard: true });
     app.setNotFoundHandler((req, reply) => {
       // SPA fallback: unknown GET paths outside /api serve the app shell.
       if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
@@ -255,6 +263,21 @@ export function buildApp({ ctx, config, briefer = null, prRefresher = null, hear
   app.put('/api/prs/order', (req, reply) => {
     try {
       const order = setPrOrder(ctx, req.body?.order ?? []);
+      broadcast();
+      return { order };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err.message ?? err) });
+    }
+  });
+
+  // The whole stack, restated. Promote, demote, remove and reorder are all the
+  // same act — "here is the new order" — so they share one route. `order: []`
+  // clears the stack, which is why there is no delete counterpart.
+  // Validation lives in setPriorities so the 1..n invariant is enforced at the
+  // store, not merely at the edge; this handler only maps a throw onto a 400.
+  app.put('/api/priority', (req, reply) => {
+    try {
+      const order = setPriorities(ctx, req.body?.order ?? []);
       broadcast();
       return { order };
     } catch (err) {

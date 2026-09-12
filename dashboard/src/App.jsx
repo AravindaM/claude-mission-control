@@ -6,6 +6,7 @@ import Drawer from './components/Drawer.jsx';
 import ArchiveRail from './components/ArchiveRail.jsx';
 import Digest from './components/Digest.jsx';
 import GithubBoard from './components/GithubBoard.jsx';
+import PriorityStrip from './components/PriorityStrip.jsx';
 
 export default function App() {
   const { state, syncedAt, connected } = useStore();
@@ -36,6 +37,9 @@ export default function App() {
       <Header state={state} syncedAt={syncedAt} connected={connected} now={now} view={view} setView={setView} />
       <div className="flex min-h-0 flex-1">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+          {/* Board view only. Digest, archive and trash are review surfaces —
+              the stack belongs where the work is actually done. */}
+          {view === 'board' && <PriorityStrip state={state} onOpen={(t) => setOpenTaskId(t.id)} />}
           {view === 'board' && <Board state={state} onOpen={(t) => setOpenTaskId(t.id)} />}
           {view === 'github' && <GithubBoard state={state} now={now} />}
           {view === 'digest' && <Digest jiraBase={state.jiraBase} onOpen={(t) => setOpenTaskId(t.id)} />}

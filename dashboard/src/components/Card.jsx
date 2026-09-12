@@ -76,19 +76,41 @@ export default function Card({ task, now, jiraBase, onOpen }) {
         background: tileBackground(task.status),
       }}
     >
-      <div className="flex items-center gap-2">
+      {/* min-w-0 is load-bearing: a flex item defaults to min-width:auto, which
+          for nowrap text is its full content width, so the row refuses to
+          shrink and bursts out of a narrow column instead of truncating. */}
+      <div className="flex min-w-0 items-center gap-1.5">
         <span
           className={`inline-block size-[11px] shrink-0 rounded-full ${live ? '' : 'opacity-30'}`}
           style={{ background: live ? 'var(--stage-done)' : 'var(--muted)' }}
           title={live ? 'session live' : 'no live session'}
         />
-        <span className="truncate font-mono text-[16px] tracking-wide text-muted">{task.slug}</span>
+        {/* Display only — the strip states the order, this just says which of
+            the twelve cards on screen are the ones in it. The board's own sort
+            is deliberately unchanged. */}
+        {task.priority != null && (
+          <span
+            className="grid size-[22px] shrink-0 place-items-center rounded-[3px] bg-accent font-mono text-[16px] font-semibold leading-none text-bg"
+            title={`priority ${task.priority}`}
+          >
+            {task.priority}
+          </span>
+        )}
+        {/* min-w-[4ch], not min-w-0: flex-1 implies basis:0, so the ticket chip
+            claimed its content width first and the slug collapsed to nothing.
+            A floor guarantees it always renders something identifiable. */}
+        <span className="min-w-[4ch] flex-1 truncate font-mono text-[16px] tracking-wide text-muted">
+          {task.slug}
+        </span>
         {task.jira_key && (
           <a
             href={`${jiraBase}${task.jira_key}`}
             target="_blank" rel="noreferrer" data-no-drag
             onClick={(e) => e.stopPropagation()}
-            className="ml-auto shrink-0 rounded border border-line px-1 font-mono text-[15px] text-accent hover:border-accent"
+            // Allowed to shrink rather than shrink-0: at the 190px column
+            // floor a fixed-width ticket chip plus a rank badge squeezed the
+            // slug to zero and it vanished entirely. Both truncate instead.
+            className="min-w-0 max-w-[10ch] truncate rounded border border-line px-1 font-mono text-[15px] text-accent hover:border-accent"
           >
             {task.jira_key}
           </a>
@@ -100,8 +122,8 @@ export default function Card({ task, now, jiraBase, onOpen }) {
       <div className="mt-2">
         <StageStrip task={task} />
       </div>
-      <div className="mt-2 flex items-center gap-2 font-mono text-[15px] text-muted">
-        {repoName && <span className="truncate">{repoName}</span>}
+      <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-[15px] text-muted">
+        {repoName && <span className="min-w-0 flex-1 truncate">{repoName}</span>}
         <span className="ml-auto shrink-0">{agoLabel(task.last_activity_at, now)}</span>
         <RefreshBriefButton task={task} />
       </div>
