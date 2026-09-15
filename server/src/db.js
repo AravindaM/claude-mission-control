@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   jira_key TEXT,
   repo_path TEXT,
   priority INTEGER,
+  -- When the About pass last succeeded. A cache of when we ran, not user
+  -- intent, so it is deliberately NOT mirrored into BRIEF.md frontmatter:
+  -- losing it on a rebuild costs one extra pass and nothing else.
+  about_generated_at INTEGER,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -109,6 +113,7 @@ function migrate(db) {
     // the state of almost every task. Among eligible tasks the non-null values
     // are exactly 1..n — see setPriorities.
     'ALTER TABLE tasks ADD COLUMN priority INTEGER',
+    'ALTER TABLE tasks ADD COLUMN about_generated_at INTEGER',
   ]) {
     try {
       db.exec(ddl);

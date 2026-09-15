@@ -168,8 +168,8 @@ PR to a task from its card, or leave it unlinked — reviews you owe have no tas
 Each task's `~/claude-tasks/<task>/BRIEF.md` has five sections on two different
 cadences, which is what keeps regeneration cheap:
 
-- **About** — why the task exists and what's changing. Stable; rewritten only when
-  you press `↻ rewrite`.
+- **About** — why the task exists and what's changing. Stable: rewritten roughly
+  every half hour of active work, or on demand with `↻ rewrite`.
 - **Status** — Now / Next / Blockers, plus which branch the code is on and how the
   PRs look. Regenerated as you work.
 - **Links** — things you would actually open: PRs, tickets, dashboards. URLs are pulled
@@ -196,6 +196,7 @@ without the server running. Every save keeps the previous version in
 | `claudeBin` | resolved | Absolute path to `claude` |
 | `briefModel` | `sonnet` | Model used for brief generation |
 | `staleMinutes` | `4` | Minimum gap between Status refreshes |
+| `aboutStaleMinutes` | `28` | Minimum gap between full rewrites of the stable sections. `0` disables |
 | `jiraBase` | `""` | e.g. `https://your-org.atlassian.net/browse/` to make Jira chips link |
 | `unboundRetentionDays` | `30` | How long transcripts with no task are kept |
 | `trashRetentionDays` | `30` | How long trashed tasks are recoverable |
@@ -248,7 +249,7 @@ sensitive, that directory deserves the same care as the repos themselves.
 
 ```sh
 npm install
-npm test                      # 203 vitest tests
+npm test                      # 207 vitest tests
 sh hooks/test/hook.test.sh    # hook contract tests (shell)
 npm start                     # run the server in the foreground
 cd dashboard && npm run dev   # dashboard with HMR against a running server

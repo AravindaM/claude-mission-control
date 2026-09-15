@@ -99,7 +99,7 @@ resolves against the dashboard's own address and goes nowhere.
 - <a rule that must not be broken, one line, max 20 words, and NO reason. A thing
   you would never re-litigate but might accidentally violate.>
 
-At most 5 Decisions and 6 Invariants. A choice you would never revisit is an
+At most 8 Decisions and 8 Invariants. A choice you would never revisit is an
 Invariant, not a Decision. A mere consequence of another decision is neither —
 drop it. Both sections are rewritten each time, never appended to.
 
@@ -160,7 +160,7 @@ const FINALIZE_INSTRUCTION = `${ABOUT_INSTRUCTION}
 ADDITIONALLY: also output a "## Status" section (between About and Links)
 recording the final state of the work. This task is being ARCHIVED and its
 transcripts deleted, so this brief becomes the only surviving record. Make it
-self-contained: relax the caps to 10 Decisions and every ticket, PR, dashboard
+self-contained: relax the caps to 12 Decisions and every ticket, PR, dashboard
 and environment under Links. The style rules and the Links exclusions still hold
 — the repositories and their history survive archival, so file paths and commit
 hashes stay out.`;
@@ -304,7 +304,26 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
   // Rewrites About/Decisions/Links and preserves whatever Status already existed.
   // Runs once per task — on first brief, or when a human explicitly asks — because
   // detecting "the scope drifted" from a transcript is not something to guess at.
-  async function aboutPass(task, slices, sessionUuid) {
+  /**
+   * Is the stable half old enough to redo?
+   *
+   * Without this the About pass ran only on a forced refresh or on archive, so
+   * a task worked across several days carried the Decisions it was given in its
+   * first hour — and the Links section missed every PR opened since.
+   *
+   * The pass rewrites Decisions and Invariants from scratch rather than
+   * appending, so this is a real trade: more often means fresher, and also more
+   * chances to drop something already recorded. Hence "much slower than Status"
+   * rather than "every sweep".
+   */
+  function aboutIsStale(task, now = Date.now()) {
+    const minutes = config.aboutStaleMinutes ?? 28;
+    if (!minutes) return false; // 0 = forced refresh and archive only
+    return task.about_generated_at == null
+      || now - task.about_generated_at > minutes * 60 * 1000;
+  }
+
+  async function aboutPass(task, slices, sessionUuid, now = Date.now()) {
     const { code, out, err } = await runClaude(aboutPrompt(task, slices));
     const fresh = normalizeOutput(out, '## About');
     if (code !== 0 || !fresh.startsWith('## About') || hasSection(fresh, 'Status')
@@ -314,6 +333,9 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
     }
     const status = sectionOf(getBrief(ctx, task.id), 'Status');
     saveBrief(ctx, task.id, status ? spliceSection(fresh, 'Status', status) : fresh, 'auto');
+    // Stamped only on success, so a failure retries on the next sweep instead of
+    // sitting out another full interval.
+    ctx.db.prepare('UPDATE tasks SET about_generated_at = ? WHERE id = ?').run(now, task.id);
     return true;
   }
 
@@ -345,7 +367,7 @@ export function createBriefer({ ctx, config, spawn = nodeSpawn }) {
     // `about` is the explicit request — the only way back from an About that has
     // gone stale or absorbed progress it should never have carried.
     // An About failure is not fatal: statusPrompt falls back to the whole brief.
-    if (about || !hasSection(getBrief(ctx, taskId), 'About')) {
+    if (about || !hasSection(getBrief(ctx, taskId), 'About') || aboutIsStale(task)) {
       await aboutPass(task, sliceFor(sessions, force, ABOUT_BUDGET_BYTES), last);
     }
     if (!await statusPass(task, slices, last)) return; // watermarks held for the retry
