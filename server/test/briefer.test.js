@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import matter from 'gray-matter';
 import { openDb } from '../src/db.js';
 import { createPaths } from '../src/paths.js';
-import { createTask, saveBrief } from '../src/taskstore.js';
+import { createTask, saveBrief, getTask } from '../src/taskstore.js';
 import { createBriefer } from '../src/briefer.js';
 import { countTurns } from '../src/transcript.js';
 import { sectionOf } from '../src/briefformat.js';
@@ -55,6 +55,11 @@ describe('briefer', () => {
     config = { claudeBin: '/fake/claude', briefModel: 'sonnet', dataDir };
     task = createTask(ctx, { title: 'Briefed Task', repoPath: '/repo/a' });
     saveBrief(ctx, task.id, SEED_BRIEF, 'manual');
+    // The seed brief already has an About, so treat it as freshly generated.
+    // A NULL here means "never ran the About pass", which is genuinely stale —
+    // the periodic-refresh tests below set their own value to exercise that.
+    ctx.db.prepare('UPDATE tasks SET about_generated_at = ? WHERE id = ?')
+      .run(Date.now(), task.id);
   });
 
   function insertSession(over = {}) {
@@ -486,6 +491,63 @@ describe('briefer', () => {
     expect(at('Status')).toBeLessThan(at('Links'));
     expect(at('Links')).toBeLessThan(at('Decisions'));
     expect(at('Decisions')).toBeLessThan(at('Invariants'));
+  });
+
+  // The stable half used to be rewritten only on a forced refresh or on archive,
+  // so a task worked for days carried the Decisions it got in its first hour and
+  // a Links section missing every PR opened since.
+  describe('periodic About refresh', () => {
+    const ABOUT_OUT = '## About\nrefreshed scope\n\n## Links\n- PR #9\n\n## Decisions\n- newer choice';
+    const staleBy = (mins) => Date.now() - mins * 60 * 1000;
+
+    it('redoes the stable half once it is older than aboutStaleMinutes', async () => {
+      const { spawn, calls } = fakeSpawnFactory({ outputs: [ABOUT_OUT, '## Status\n- Now: x'] });
+      const briefer = createBriefer({ ctx, config: { ...config, aboutStaleMinutes: 28 }, spawn });
+      ctx.db.prepare('UPDATE tasks SET about_generated_at = ? WHERE id = ?').run(staleBy(40), task.id);
+      briefer.enqueue(insertSession({ uuid: 'about-stale' }));
+      await briefer.drain();
+
+      expect(calls.length).toBe(2); // About pass AND Status pass
+      const body = matter(readFileSync(ctx.paths.briefFile(task.slug), 'utf8')).content;
+      expect(sectionOf(body, 'Decisions')).toContain('newer choice');
+      expect(sectionOf(body, 'Status')).toContain('Now: x');
+    });
+
+    it('leaves the stable half alone while it is still fresh', async () => {
+      const { spawn, calls } = fakeSpawnFactory({ output: '## Status\n- Now: y' });
+      const briefer = createBriefer({ ctx, config: { ...config, aboutStaleMinutes: 28 }, spawn });
+      ctx.db.prepare('UPDATE tasks SET about_generated_at = ? WHERE id = ?').run(staleBy(5), task.id);
+      briefer.enqueue(insertSession({ uuid: 'about-fresh' }));
+      await briefer.drain();
+
+      expect(calls.length).toBe(1); // Status only
+      const body = matter(readFileSync(ctx.paths.briefFile(task.slug), 'utf8')).content;
+      expect(sectionOf(body, 'Decisions')).toContain('seeded choice'); // untouched
+    });
+
+    it('aboutStaleMinutes 0 restores the old forced-refresh-only behaviour', async () => {
+      const { spawn, calls } = fakeSpawnFactory({ output: '## Status\n- Now: z' });
+      const briefer = createBriefer({ ctx, config: { ...config, aboutStaleMinutes: 0 }, spawn });
+      ctx.db.prepare('UPDATE tasks SET about_generated_at = ? WHERE id = ?').run(staleBy(999), task.id);
+      briefer.enqueue(insertSession({ uuid: 'about-off' }));
+      await briefer.drain();
+      expect(calls.length).toBe(1);
+    });
+
+    // Stamping regardless of outcome would make a failed pass sit out another
+    // whole interval, which is the opposite of what a failure should cost.
+    it('only stamps the timestamp when the pass actually succeeded', async () => {
+      const { spawn } = fakeSpawnFactory({
+        outputs: ['I cannot do that', '## Status\n- Now: q'], // About rejected
+      });
+      const briefer = createBriefer({ ctx, config: { ...config, aboutStaleMinutes: 28 }, spawn });
+      ctx.db.prepare('UPDATE tasks SET about_generated_at = NULL WHERE id = ?').run(task.id);
+      briefer.enqueue(insertSession({ uuid: 'about-fail' }));
+      await briefer.drain();
+
+      expect(getTask(ctx, task.id).about_generated_at).toBeNull();
+      expect(ctx.db.prepare("SELECT COUNT(*) c FROM events WHERE type='brief_failed'").get().c).toBe(1);
+    });
   });
 
   it('rejects a Status pass that emits a whole brief, keeping the stable sections', async () => {
